@@ -1,19 +1,21 @@
+import logging
 import os
+import re
 import shutil
 import signal
 import sys
 from queue import Queue, Empty
-from threading import Thread, Lock
+from threading import Thread, Lock, Event
 import io
 import importlib
 import json
-from time import sleep
 from datetime import datetime
 from subprocess import Popen, PIPE, STDOUT
 
 from ydl_server.config import resolve_finished_file
 from ydl_server.db import JobsDB, Job, Actions, JobType
 
+logger = logging.getLogger(__name__)
 
 YDL_MODULES = ["youtube_dl", "youtube_dlc", "yt_dlp"]
 
@@ -22,7 +24,7 @@ def get_ydl_website(ydl_module_name):
     try:
         import pip._internal.commands.show as pipshow
     except ModuleNotFoundError:
-        print("Module not found, skipping get_ydl_website")
+        logger.warning("Module not found, skipping get_ydl_website")
         return None
 
     info = list(pipshow.search_packages_info([ydl_module_name]))
@@ -40,6 +42,25 @@ def get_ydl_website(ydl_module_name):
 
 def read_proc_stdout(proc, strio):
     strio.write(proc.stdout.read1().decode())
+
+
+DESTINATION_RE = re.compile(r"^\[download\] Destination: (.+)$", re.MULTILINE)
+
+
+def cleanup_partial_downloads(log_text):
+    """Remove yt-dlp's .part temp file(s) for a download job that didn't
+    complete successfully, matching the cleanup cut() already does on its
+    own failure. Only ever touches the .part file, never the final output
+    path itself, in case an earlier segment of a multi-file job already
+    finished successfully before the job failed or was stopped.
+    """
+    for match in DESTINATION_RE.finditer(log_text):
+        part_path = match.group(1).strip() + ".part"
+        if os.path.isfile(part_path):
+            try:
+                os.remove(part_path)
+            except OSError as e:
+                logger.warning("Could not remove partial download %s: %s", part_path, e)
 
 
 class YdlHandler:
@@ -69,10 +90,9 @@ class YdlHandler:
         else:
             # Fall back to running as a Python module: `python -m yt_dlp`
             self.ydl_cmd = [sys.executable, "-m", ydl_module.__name__]
-            print(
-                "Warning: '{}' not found on PATH, falling back to '{}'".format(
-                    self.ydl_module_name, " ".join(self.ydl_cmd)
-                )
+            logger.warning(
+                "'%s' not found on PATH, falling back to '%s'",
+                self.ydl_module_name, " ".join(self.ydl_cmd),
             )
 
         self.ydls_version = os.environ.get("YDLS_VERSION", "")
@@ -106,7 +126,7 @@ class YdlHandler:
 
         self.import_ydl_module()
 
-        print("Using {} module".format(self.ydl_module_name))
+        logger.info("Using %s module", self.ydl_module_name)
 
     def stop_job(self, job_id):
         """Signal the live subprocess for job_id, if we still hold a handle to it.
@@ -138,7 +158,7 @@ class YdlHandler:
             thread = Thread(target=self.worker, args=(i,))
             self.threads.append(thread)
             thread.start()
-            print("Started dl worker %i" % i)
+            logger.info("Started dl worker %i", i)
 
     def put(self, obj):
         self.queue.put(obj)
@@ -171,11 +191,7 @@ class YdlHandler:
                 job.log = "Error during download task:\n{}:\n\t{}".format(
                     type(e).__name__, str(e)
                 )
-                print(
-                    "Error during download task:\n{}:\n\t{}".format(
-                        type(e).__name__, str(e)
-                    )
-                )
+                logger.exception("Error during download task for job %s", job.id)
             self.jobshandler.put((Actions.UPDATE, job))
 
     def get_format_and_profile(self, format_string):
@@ -249,12 +265,12 @@ class YdlHandler:
             ydl_config.update(aliases)
         return ydl_config
 
-    def download_log_update(self, job, proc, strio):
-        while job.status == Job.RUNNING:
+    def download_log_update(self, job, proc, strio, stop_event):
+        while not stop_event.is_set():
             read_proc_stdout(proc, strio)
             job.log = Job.clean_logs(strio.getvalue())
             self.jobshandler.put((Actions.SET_LOG, (job.id, job.log)))
-            sleep(3)
+            stop_event.wait(3)
 
     def fetch_metadata(self, url, force_generic_extractor=False):
         ydl_opts = self.app_config.get("ydl_options", {})
@@ -299,7 +315,7 @@ class YdlHandler:
         if rc != 0:
             job.log = Job.clean_logs(metadata)
             job.status = Job.FAILED
-            print("Error in metadata fetching process:\n" + job.log)
+            logger.error("Error in metadata fetching process:\n%s", job.log)
             raise Exception(job.log)
 
         title = ", ".join(
@@ -335,14 +351,15 @@ class YdlHandler:
             if fmt_proc.returncode == 0 and fmt_stdout.strip():
                 output.write("[format] {}\n".format(fmt_stdout.decode().strip()))
         except Exception as e:
-            print("Error looking up format", e)
+            logger.warning("Error looking up format: %s", e)
 
         proc = Popen(cmd, stdout=PIPE, stderr=STDOUT)
         self.jobshandler.put((Actions.SET_PID, (job.id, proc.pid)))
         with self.running_procs_lock:
             self.running_procs[job.id] = proc
+        stop_log_thread = Event()
         stdout_thread = Thread(
-            target=self.download_log_update, args=(job, proc, output)
+            target=self.download_log_update, args=(job, proc, output, stop_log_thread)
         )
         stdout_thread.start()
 
@@ -351,18 +368,19 @@ class YdlHandler:
         finally:
             with self.running_procs_lock:
                 self.running_procs.pop(job.id, None)
+
+        # Stop and join the log-tailing thread before doing our own final
+        # read, so the two threads never call proc.stdout.read1() at once.
+        stop_log_thread.set()
+        stdout_thread.join()
+        read_proc_stdout(proc, output)
+        job.log = Job.clean_logs(output.getvalue())
         if rc == 0:
-            read_proc_stdout(proc, output)
-            job.log = Job.clean_logs(output.getvalue())
             job.status = Job.COMPLETED
         else:
-            read_proc_stdout(proc, output)
-            job.log = Job.clean_logs(output.getvalue())
             job.status = Job.FAILED
-            print(
-                "Error in download process (RC=" + str(rc) + "):\n" + output.getvalue()
-            )
-        stdout_thread.join()
+            cleanup_partial_downloads(output.getvalue())
+            logger.error("Error in download process (RC=%s):\n%s", rc, output.getvalue())
 
     def cut(self, job, output):
         params = job.extra_params
@@ -386,8 +404,9 @@ class YdlHandler:
         self.jobshandler.put((Actions.SET_PID, (job.id, proc.pid)))
         with self.running_procs_lock:
             self.running_procs[job.id] = proc
+        stop_log_thread = Event()
         stdout_thread = Thread(
-            target=self.download_log_update, args=(job, proc, output)
+            target=self.download_log_update, args=(job, proc, output, stop_log_thread)
         )
         stdout_thread.start()
 
@@ -396,6 +415,9 @@ class YdlHandler:
         finally:
             with self.running_procs_lock:
                 self.running_procs.pop(job.id, None)
+
+        stop_log_thread.set()
+        stdout_thread.join()
         read_proc_stdout(proc, output)
         job.log = Job.clean_logs(output.getvalue())
         if rc == 0:
@@ -404,9 +426,7 @@ class YdlHandler:
             job.status = Job.FAILED
             if os.path.isfile(dst):
                 os.remove(dst)
-            print(
-                "Error in cut process (RC=" + str(rc) + "):\n" + output.getvalue()
-            )
+            logger.error("Error in cut process (RC=%s):\n%s", rc, output.getvalue())
         stdout_thread.join()
 
     def resume_pending(self):

@@ -2,8 +2,13 @@ from __future__ import unicode_literals
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
+import logging
 import uvicorn
 import signal
+
+from ydl_server.logging_config import configure_logging
+
+configure_logging()
 
 from ydl_server.db import JobsDB
 
@@ -13,7 +18,12 @@ from ydl_server.config import app_config
 
 from ydl_server.routes import routes
 
+logger = logging.getLogger(__name__)
+
 if __name__ == "__main__":
+    if app_config["ydl_server"].get("debug", False):
+        logging.getLogger().setLevel(logging.DEBUG)
+
     JobsDB.init()
 
     middleware = [Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"])]
@@ -31,22 +41,22 @@ if __name__ == "__main__":
     def shutdown():
         if not app.state.running:
             return
-        print("Shutting down...")
+        logger.info("Shutting down...")
         app.state.jobshandler.finish()
         app.state.ydlhandler.finish()
-        print("Waiting for workers to wrap up...")
+        logger.info("Waiting for workers to wrap up...")
         app.state.ydlhandler.join()
         app.state.jobshandler.join()
-        print("Shutdown complete.")
+        logger.info("Shutdown complete.")
         app.state.running = False
 
     signal.signal(signal.SIGINT, lambda sig, frame: shutdown())
     signal.signal(signal.SIGTERM, lambda sig, frame: shutdown())
 
     app.state.ydlhandler.start()
-    print("Started download threads")
+    logger.info("Started download threads")
     app.state.jobshandler.start(app.state.ydlhandler.queue)
-    print("Started jobs manager thread")
+    logger.info("Started jobs manager thread")
 
     app.state.ydlhandler.resume_pending()
 

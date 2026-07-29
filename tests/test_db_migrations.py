@@ -21,6 +21,17 @@ def _user_version(conn):
     return version
 
 
+def _index_columns(conn):
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA index_list('jobs')")
+    indexed = set()
+    for row in cursor.fetchall():
+        cursor.execute(f"PRAGMA index_info('{row[1]}')")
+        indexed.update(col[2] for col in cursor.fetchall())
+    cursor.close()
+    return indexed
+
+
 @pytest.fixture
 def conn():
     connection = sqlite3.connect(":memory:")
@@ -182,3 +193,18 @@ def test_create_is_idempotent(conn):
     JobsDB.create(conn)
     JobsDB.create(conn)  # "IF NOT EXISTS" — should not raise
     assert _user_version(conn) == JobsDB.SCHEMA_VERSION
+
+
+def test_create_adds_status_and_last_update_indexes(conn):
+    JobsDB.create(conn)
+    indexed = _index_columns(conn)
+    assert "status" in indexed
+    assert "last_update" in indexed
+
+
+def test_migrate_from_legacy_version_also_adds_indexes(conn):
+    _create_legacy_v0_table(conn, with_force_generic_extractor=False)
+    JobsDB.migrate(conn, JobsDB.db_version(conn))
+    indexed = _index_columns(conn)
+    assert "status" in indexed
+    assert "last_update" in indexed

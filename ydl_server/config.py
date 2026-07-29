@@ -1,8 +1,11 @@
+import logging
 import os
 import re
 import yaml
 import shutil
 from functools import cache
+
+logger = logging.getLogger(__name__)
 
 YDL_PATH_TYPES = (
     "home",
@@ -120,18 +123,16 @@ def get_config_file_path():
 def load_config():
     config = None
     config_file_path = get_config_file_path()
-    print("Using configuration file {}".format(config_file_path))
+    logger.info("Using configuration file %s", config_file_path)
 
     if not os.path.isfile(config_file_path):
-        print(
-            "{} does not exist, creating it from default values".format(
-                config_file_path
-            )
+        logger.info(
+            "%s does not exist, creating it from default values", config_file_path
         )
         try:
             copy_default_config(config_file_path)
         except Exception:
-            print("Error copying default config file, loading it directly")
+            logger.warning("Error copying default config file, loading it directly")
             config_file_path = "./default_config.yml"
     with open(config_file_path) as configfile:
         config = yaml.load(configfile, Loader=yaml.SafeLoader)

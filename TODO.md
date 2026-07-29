@@ -22,11 +22,11 @@ Check items off as they land; each links back to the file(s) involved.
 
 ## Phase 3 — Foundational reliability work (do after Phase 2 has coverage)
 
-- [ ] Replace `print()` calls with the `logging` module across the backend (levels, timestamps, ship-able output)
-- [ ] Collapse the near-duplicate migration cases in `db.py:121-218` into a single "apply missing migrations" loop
-- [ ] Add DB indexes on `jobs.status` / `jobs.last_update` (used by `get_jobs_with_logs`, `clean_old_jobs`)
-- [ ] Fix the log-tailing race in `read_proc_stdout` (`read1()` can lose/interleave output around `proc.wait()`) (`ydl_server/ydlhandler.py`)
-- [ ] Clean up partial download files when a job is aborted, matching what `cut()` already does on failure (`ydl_server/ydlhandler.py`)
+- [x] Replace `print()` calls with the `logging` module across the backend (levels, timestamps, ship-able output) — added `ydl_server/logging_config.py`, configured before any other import in `youtube-dl-server.py`, debug flag bumps root logger to DEBUG
+- [x] Collapse the near-duplicate migration cases in `db.py:121-218` into a single "apply missing migrations" loop — now inspects actual columns present rather than trusting the stored version number
+- [x] Add DB indexes on `jobs.status` / `jobs.last_update` (used by `get_jobs_with_logs`, `clean_old_jobs`)
+- [x] Fix the log-tailing race in `read_proc_stdout` (`read1()` can lose/interleave output around `proc.wait()`) (`ydl_server/ydlhandler.py`) — log-tailing thread now stops and is joined via a `threading.Event` before the main thread's final read, so the two never call `read1()` concurrently
+- [x] Clean up partial download files when a job is aborted, matching what `cut()` already does on failure (`ydl_server/ydlhandler.py`) — parses `[download] Destination:` lines from the captured log and removes the matching `.part` file, never the final output path itself
 
 ## Phase 4 — Frontend correctness fixes (small, independent)
 

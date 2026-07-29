@@ -9,10 +9,12 @@ from ydl_server.config import (
     resolve_finished_file,
 )
 from ydl_server.db import JobsDB, Job, Actions, JobType
+import logging
 import os
 import re
 import shutil
 
+logger = logging.getLogger(__name__)
 
 TIMESTAMP_RE = re.compile(r"^(\d+(\.\d+)?|(\d+:)?[0-5]?\d:[0-5]?\d(\.\d+)?)$")
 
@@ -31,7 +33,7 @@ def build_finished_tree(root_dir, seen=None, depth=0):
     try:
         entries = list(os.scandir(root_dir))
     except OSError as e:
-        print(f"Error scanning {root_dir} - {e}")
+        logger.error("Error scanning %s - %s", root_dir, e)
         return []
     if seen is None:
         seen = set()
@@ -44,7 +46,7 @@ def build_finished_tree(root_dir, seen=None, depth=0):
             stat = entry.stat()
             is_dir = entry.is_dir()
         except Exception as e:
-            print(f"Error accessing {entry.path} - {e}")
+            logger.error("Error accessing %s - %s", entry.path, e)
         children = None
         if is_dir:
             children = []
@@ -86,7 +88,7 @@ async def api_delete_file(request):
         else:
             fname.unlink()
     except OSError as e:
-        print(e)
+        logger.error("Error deleting %s - %s", fname, e)
         return JSONResponse(
             {"success": False, "message": f"Could not delete the specified file (Err {e.errno or 'unknown'})"}
         )
@@ -210,13 +212,13 @@ async def api_jobs_stop(request):
     if not job:
         return JSONResponse({"success": False, "message": "Job not found"}, status_code=404)
     if job["status"] == "Pending":
-        print("Cancelling pending job")
+        logger.info("Cancelling pending job %s", job["id"])
         request.app.state.jobshandler.put(
             (Actions.SET_STATUS, (job["id"], Job.ABORTED))
         )
         return JSONResponse({"success": True})
     if job["status"] == "Running" and int(job["pid"]) != 0:
-        print("Stopping running job", job["pid"])
+        logger.info("Stopping running job %s (pid %s)", job["id"], job["pid"])
         if request.app.state.ydlhandler.stop_job(job["id"]):
             return JSONResponse({"success": True})
         return JSONResponse(
@@ -295,7 +297,7 @@ async def api_queue_download(request):
     job.force_generic_extractor = force_generic_extractor
     request.app.state.jobshandler.put((Actions.INSERT, job))
 
-    print("Added url " + ",".join(urls) + " to the download queue")
+    logger.info("Added url %s to the download queue", ",".join(urls))
     return JSONResponse({"success": True, "urls": urls, "options": options})
 
 

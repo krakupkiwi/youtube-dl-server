@@ -1,3 +1,4 @@
+import logging
 import sqlite3
 import re
 import datetime
@@ -5,6 +6,8 @@ import json
 from functools import wraps
 
 from ydl_server.config import app_config
+
+logger = logging.getLogger(__name__)
 
 
 def _sqlite_uri(path, readonly=False):
@@ -117,109 +120,53 @@ class JobsDB:
         version = int(cursor.fetchone()[0])
         return version
 
+    # Base columns that have existed since the very first schema; if any of
+    # these are missing the table isn't just outdated, it's incompatible.
+    BASE_COLUMNS = {
+        "id", "name", "status", "format", "log", "last_update", "type", "url", "pid",
+    }
+
+    # (column, DDL) pairs for columns added by later schema versions, applied
+    # in order to whichever of them are missing regardless of the DB's
+    # recorded version - the actual columns present are the source of truth.
+    COLUMN_MIGRATIONS = [
+        ("force_generic_extractor", "ALTER TABLE jobs ADD COLUMN force_generic_extractor INTEGER DEFAULT 0;"),
+        ("extra_params", "ALTER TABLE jobs ADD COLUMN extra_params TEXT DEFAULT '{}';"),
+    ]
+
     @staticmethod
     def migrate(conn, version):
-        print(f"Migrating database from version {version}")
-        match version:
-            case -1:
-                print("No jobs table found, creating")
-                JobsDB.create(conn)
-                return
-            case 0:
-                cursor = conn.cursor()
-                cursor.execute("PRAGMA table_info('jobs')")
-                columns = [row[1] for row in cursor.fetchall()]
-                if set(columns) != set([
-                        "id",
-                        "name",
-                        "status",
-                        "format",
-                        "log",
-                        "last_update",
-                        "type",
-                        "url",
-                        "pid",
-                    ]):
-                    print("Outdated jobs table, cleaning up and recreating")
-                    cursor.execute("DROP TABLE if exists jobs;")
-                    conn.commit()
-                    JobsDB.create(conn)
-                    return
-                if "force_generic_extractor" not in columns:
-                    print("Adding force_generic_extractor column to jobs table")
-                    cursor.execute("ALTER TABLE jobs ADD COLUMN force_generic_extractor INTEGER DEFAULT 0;")
-                    conn.commit()
-                cursor.execute(
-                    f"PRAGMA user_version = {JobsDB.SCHEMA_VERSION};"
-                )
+        logger.info("Migrating database from version %s", version)
+        if version == -1:
+            logger.info("No jobs table found, creating")
+            JobsDB.create(conn)
+            return
+
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info('jobs')")
+        columns = {row[1] for row in cursor.fetchall()}
+
+        if not JobsDB.BASE_COLUMNS.issubset(columns):
+            logger.warning("Incompatible jobs table, cleaning up and recreating")
+            cursor.execute("DROP TABLE if exists jobs;")
+            conn.commit()
+            JobsDB.create(conn)
+            return
+
+        for column, ddl in JobsDB.COLUMN_MIGRATIONS:
+            if column not in columns:
+                logger.info("Adding %s column to jobs table", column)
+                cursor.execute(ddl)
                 conn.commit()
-                return
-            case 1:
-                cursor = conn.cursor()
-                cursor.execute("PRAGMA table_info('jobs')")
-                columns = [row[1] for row in cursor.fetchall()]
-                if "force_generic_extractor" not in columns:
-                    print("Adding force_generic_extractor column to jobs table")
-                    cursor.execute("ALTER TABLE jobs ADD COLUMN force_generic_extractor INTEGER DEFAULT 0;")
-                    conn.commit()
-                if "extra_params" not in columns:
-                    print("Adding extra_params column to jobs table")
-                    cursor.execute("ALTER TABLE jobs ADD COLUMN extra_params TEXT DEFAULT '{}';")
-                    conn.commit()
-                cursor.execute(
-                    f"PRAGMA user_version = {JobsDB.SCHEMA_VERSION};"
-                )
-                conn.commit()
-                return
-            case 2:
-                cursor = conn.cursor()
-                cursor.execute("PRAGMA table_info('jobs')")
-                columns = [row[1] for row in cursor.fetchall()]
-                if "extra_params" not in columns:
-                    print("Adding extra_params column to jobs table")
-                    cursor.execute("ALTER TABLE jobs ADD COLUMN extra_params TEXT DEFAULT '{}';") 
-                    conn.commit()
-                cursor.execute(
-                    f"PRAGMA user_version = {JobsDB.SCHEMA_VERSION};"
-                )
-                conn.commit()
-                return
-            case JobsDB.SCHEMA_VERSION:
-                cursor = conn.cursor()
-                cursor.execute(
-                    f"PRAGMA user_version = {JobsDB.SCHEMA_VERSION};"
-                )
-                conn.commit()
-                return
-            case _:
-                print(f"Unknown database version {version}, checking schema")
-                cursor = conn.cursor()
-                cursor.execute("PRAGMA table_info('jobs')")
-                columns = [row[1] for row in cursor.fetchall()]
-                required = {
-                    "id",
-                    "name",
-                    "status",
-                    "format",
-                    "log",
-                    "last_update",
-                    "type",
-                    "url",
-                    "pid",
-                    "force_generic_extractor",
-                    "extra_params",
-                }
-                if not required.issubset(columns):
-                    print("Incompatible jobs table, cleaning up and recreating")
-                    cursor.execute("DROP TABLE if exists jobs;")
-                    conn.commit()
-                    JobsDB.create(conn)
-                    return
-                cursor.execute(
-                    f"PRAGMA user_version = {JobsDB.SCHEMA_VERSION};"
-                )
-                conn.commit()
-                return
+
+        JobsDB.create_indexes(cursor)
+        cursor.execute(f"PRAGMA user_version = {JobsDB.SCHEMA_VERSION};")
+        conn.commit()
+
+    @staticmethod
+    def create_indexes(cursor):
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_last_update ON jobs(last_update);")
 
     @staticmethod
     def create(conn):
@@ -243,6 +190,7 @@ class JobsDB:
                     );
                 """
             )
+            JobsDB.create_indexes(cursor)
             cursor.execute(
                 f"PRAGMA user_version = {SCHEMA_VERSION};"
             )
@@ -343,7 +291,7 @@ class JobsDB:
         )
 
     def vacuum(self):
-        print("Vacuuming database")
+        logger.info("Vacuuming database")
         self.conn.execute("VACUUM")
 
     @with_cursor
