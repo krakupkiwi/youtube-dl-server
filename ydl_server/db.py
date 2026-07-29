@@ -162,6 +162,10 @@ class JobsDB:
                     print("Adding force_generic_extractor column to jobs table")
                     cursor.execute("ALTER TABLE jobs ADD COLUMN force_generic_extractor INTEGER DEFAULT 0;")
                     conn.commit()
+                if "extra_params" not in columns:
+                    print("Adding extra_params column to jobs table")
+                    cursor.execute("ALTER TABLE jobs ADD COLUMN extra_params TEXT DEFAULT '{}';")
+                    conn.commit()
                 cursor.execute(
                     f"PRAGMA user_version = {JobsDB.SCHEMA_VERSION};"
                 )

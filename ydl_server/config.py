@@ -1,4 +1,5 @@
 import os
+import re
 import yaml
 import shutil
 from functools import cache
@@ -143,7 +144,7 @@ def load_config():
 
 def get_static_prefix(output_template):
     prefix = []
-    for s in output_template.split("/"):
+    for s in re.split(r"[\\/]", output_template):
         if "%" in s.replace("%%", ""):
             break
         prefix.append(s)
@@ -188,7 +189,13 @@ def resolve_finished_file(fname):
     """Resolve fname within the finished directory, or None if it escapes it."""
     root = os.path.realpath(get_finished_path())
     path = os.path.realpath(os.path.join(root, fname))
-    if path != root and os.path.commonpath((path, root)) != root:
+    if path == root:
+        return path
+    try:
+        if os.path.commonpath((path, root)) != root:
+            return None
+    except ValueError:
+        # e.g. on Windows, comparing paths on two different drive letters
         return None
     return path
 

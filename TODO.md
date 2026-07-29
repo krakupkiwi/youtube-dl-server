@@ -14,11 +14,11 @@ Check items off as they land; each links back to the file(s) involved.
 
 ## Phase 2 — Regression test safety net (before refactoring anything below)
 
-- [ ] Set up a `tests/` directory + test runner (pytest) and wire it into CI
-- [ ] Tests for DB migration path across schema versions (`ydl_server/db.py`)
-- [ ] Tests for the Windows/Unix SQLite URI logic (`_sqlite_uri` in `ydl_server/db.py`)
-- [ ] Tests for alias/profile resolution, including recursive alias handling (`ydl_server/config.py`)
-- [ ] Tests for path-traversal guards: `resolve_finished_file`, `api_delete_file`, `api_cut_file`
+- [x] Set up a `tests/` directory + test runner (pytest) and wire it into CI (`.github/workflows/ci.yml`, `requirements-dev.txt`)
+- [x] Tests for DB migration path across schema versions (`tests/test_db_migrations.py`) — caught a real bug: migrating from schema v1 never added the `extra_params` column while still stamping the DB as current; fixed in `db.py`
+- [x] Tests for the Windows/Unix SQLite URI logic (`tests/test_sqlite_uri.py`)
+- [x] Tests for alias/profile resolution, including recursive alias handling (`tests/test_config_aliases.py`)
+- [x] Tests for path-traversal guards: `resolve_finished_file`, `api_delete_file`, `api_cut_file` (`tests/test_path_traversal.py`) — caught two real bugs: `get_static_prefix` didn't split on backslashes (Windows configs silently fell back to resolving downloads to cwd, the same bug class as upstream #152) and `resolve_finished_file` crashed instead of rejecting when given a path on a different Windows drive letter; both fixed in `config.py`
 
 ## Phase 3 — Foundational reliability work (do after Phase 2 has coverage)
 
