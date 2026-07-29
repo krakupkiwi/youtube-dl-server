@@ -54,7 +54,7 @@ class Job:
     PENDING = 3
     ABORTED = 4
 
-    def __init__(self, name, status, log, jobtype, format=None, url=None, id=-1, pid=0, force_generic_extractor=False, extra_params={}):
+    def __init__(self, name, status, log, jobtype, format=None, url=None, id=-1, pid=0, force_generic_extractor=False, extra_params=None):
         self.id = id
         self.name = name
         self.status = status
@@ -65,7 +65,7 @@ class Job:
         self.url = url
         self.pid = pid
         self.force_generic_extractor = force_generic_extractor
-        self.extra_params = extra_params
+        self.extra_params = extra_params if extra_params is not None else {}
 
     @staticmethod
     def clean_logs(logs):

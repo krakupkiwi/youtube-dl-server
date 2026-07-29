@@ -11,7 +11,6 @@ from ydl_server.config import (
 from ydl_server.db import JobsDB, Job, Actions, JobType
 import os
 import re
-import signal
 import shutil
 
 
@@ -109,7 +108,7 @@ async def api_cut_file(request):
     if not os.path.isfile(src):
         return JSONResponse({"success": False, "message": "File not found"})
 
-    if not output or "/" in output or output.startswith("."):
+    if not output or "/" in output or "\\" in output or "\x00" in output or output.startswith("."):
         return JSONResponse({"success": False, "message": "Invalid output filename"})
     dst = os.path.join(os.path.dirname(src), output)
     if os.path.exists(dst):
@@ -209,7 +208,7 @@ async def api_jobs_stop(request):
     db.close()
 
     if not job:
-        return JSONResponse({"success": False}, status_code=404)
+        return JSONResponse({"success": False, "message": "Job not found"}, status_code=404)
     if job["status"] == "Pending":
         print("Cancelling pending job")
         request.app.state.jobshandler.put(
@@ -218,17 +217,17 @@ async def api_jobs_stop(request):
         return JSONResponse({"success": True})
     if job["status"] == "Running" and int(job["pid"]) != 0:
         print("Stopping running job", job["pid"])
-        try:
-            print(os.kill(job["pid"], signal.SIGINT))
-        except ProcessLookupError:
-            print("Process already dead")
-        return JSONResponse({"success": True})
+        if request.app.state.ydlhandler.stop_job(job["id"]):
+            return JSONResponse({"success": True})
+        return JSONResponse(
+            {"success": False, "message": "Process already exited or is no longer tracked"}
+        )
     if int(job["pid"]) == 0:
         request.app.state.jobshandler.put(
             (Actions.SET_STATUS, (job["id"], Job.ABORTED))
         )
         return JSONResponse({"success": True})
-    return JSONResponse({"success": False})
+    return JSONResponse({"success": False, "message": "Job cannot be stopped in its current state"})
 
 
 async def api_jobs_retry(request):
@@ -237,7 +236,7 @@ async def api_jobs_retry(request):
     job = db.get_job_by_id(job_id)
     db.close()
     if not job:
-        return JSONResponse({"success": False}, status_code=404)
+        return JSONResponse({"success": False, "message": "Job not found"}, status_code=404)
 
     new_job = Job(
         job["name"], Job.PENDING, "", int(job["type"]), job["format"], job["urls"], extra_params=job.get("extra_params", {})

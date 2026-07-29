@@ -1,8 +1,9 @@
 import os
 import shutil
+import signal
 import sys
 from queue import Queue, Empty
-from threading import Thread
+from threading import Thread, Lock
 import io
 import importlib
 import json
@@ -28,7 +29,7 @@ def get_ydl_website(ydl_module_name):
     if len(info) < 1:
         return ""
     info = info[0]
-    url = getattr(info, "home-page", None) or  getattr(info, "homepage", None)
+    url = getattr(info, "homepage", None)
     if not url:
         urls = getattr(info, "project_urls", None)
         if urls:
@@ -98,12 +99,36 @@ class YdlHandler:
         self.ydl_extractors = []
         self.app_config = app_config
         self.jobshandler = jobshandler
+        self.running_procs = {}
+        self.running_procs_lock = Lock()
 
         self.app_config["ydl_last_update"] = datetime.now()
 
         self.import_ydl_module()
 
         print("Using {} module".format(self.ydl_module_name))
+
+    def stop_job(self, job_id):
+        """Signal the live subprocess for job_id, if we still hold a handle to it.
+
+        Stopping via our own tracked Popen handle (rather than a bare PID from the
+        DB) avoids ever signalling an unrelated process after PID reuse.
+        """
+        with self.running_procs_lock:
+            proc = self.running_procs.get(job_id)
+        if proc is None:
+            return False
+        try:
+            if os.name == "nt":
+                # subprocess.Popen.send_signal only supports CTRL_C_EVENT/CTRL_BREAK_EVENT
+                # (which require the child to be in a console process group we don't
+                # create) or terminate() on Windows; plain SIGINT raises ValueError.
+                proc.terminate()
+            else:
+                proc.send_signal(signal.SIGINT)
+        except (ProcessLookupError, OSError):
+            return False
+        return True
 
     def start(self):
         self.download_workers_count = self.app_config["ydl_server"].get(
@@ -314,12 +339,18 @@ class YdlHandler:
 
         proc = Popen(cmd, stdout=PIPE, stderr=STDOUT)
         self.jobshandler.put((Actions.SET_PID, (job.id, proc.pid)))
+        with self.running_procs_lock:
+            self.running_procs[job.id] = proc
         stdout_thread = Thread(
             target=self.download_log_update, args=(job, proc, output)
         )
         stdout_thread.start()
 
-        rc = proc.wait()
+        try:
+            rc = proc.wait()
+        finally:
+            with self.running_procs_lock:
+                self.running_procs.pop(job.id, None)
         if rc == 0:
             read_proc_stdout(proc, output)
             job.log = Job.clean_logs(output.getvalue())
@@ -353,12 +384,18 @@ class YdlHandler:
         output.write("[cut] {}\n".format(" ".join(cmd)))
         proc = Popen(cmd, stdout=PIPE, stderr=STDOUT)
         self.jobshandler.put((Actions.SET_PID, (job.id, proc.pid)))
+        with self.running_procs_lock:
+            self.running_procs[job.id] = proc
         stdout_thread = Thread(
             target=self.download_log_update, args=(job, proc, output)
         )
         stdout_thread.start()
 
-        rc = proc.wait()
+        try:
+            rc = proc.wait()
+        finally:
+            with self.running_procs_lock:
+                self.running_procs.pop(job.id, None)
         read_proc_stdout(proc, output)
         job.log = Job.clean_logs(output.getvalue())
         if rc == 0:
