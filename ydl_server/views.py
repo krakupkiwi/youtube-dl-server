@@ -314,3 +314,37 @@ async def api_metadata_fetch(request):
     if rc == 0:
         return JSONResponse(stdout)
     return JSONResponse({"success": False}, status_code=404)
+
+
+async def api_playlist_info(request):
+    if request.headers.get("Content-Type") == "application/x-www-form-urlencoded":
+        data = await request.form()
+    else:
+        data = await request.json()
+    url = data.get("url", "").strip()
+    if not url:
+        return JSONResponse({"success": False, "error": "No URL provided"}, status_code=400)
+
+    rc, metadata = request.app.state.ydlhandler.fetch_metadata(
+        [url], force_generic_extractor=False
+    )
+    if rc != 0:
+        return JSONResponse({"success": False, "error": "Could not fetch playlist info"}, status_code=404)
+
+    first = metadata[0] if metadata else {}
+    if first.get("_type") != "playlist":
+        return JSONResponse({"success": False, "error": "URL is not a playlist"}, status_code=400)
+
+    entries = [
+        {"title": e.get("title", e.get("url", "")), "url": e.get("url", "")}
+        for e in first.get("entries", [])
+        if e.get("url")
+    ]
+
+    return JSONResponse({
+        "success": True,
+        "title": first.get("title", ""),
+        "playlist_id": first.get("id", ""),
+        "video_count": len(entries),
+        "entries": entries,
+    })

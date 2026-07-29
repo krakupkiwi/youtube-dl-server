@@ -35,6 +35,12 @@ routes = [
         name="api_metadata_fetch",
         methods=["POST"],
     ),
+    Route(
+        "/api/playlist/info",
+        views.api_playlist_info,
+        name="api_playlist_info",
+        methods=["POST"],
+    ),
     Route("/api/finished", views.api_finished, name="api_finished", methods=["GET"]),
     Route(
         "/api/finished/{fname:path}",

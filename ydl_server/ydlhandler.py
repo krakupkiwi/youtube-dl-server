@@ -1,4 +1,6 @@
 import os
+import shutil
+import sys
 from queue import Queue, Empty
 from threading import Thread
 import io
@@ -42,10 +44,9 @@ def read_proc_stdout(proc, strio):
 class YdlHandler:
     def import_ydl_module(self):
         ydl_module = None
-        if os.environ.get("YOUTUBE_DL").replace("-", "_") in YDL_MODULES:
-            ydl_module = importlib.import_module(
-                os.environ.get("YOUTUBE_DL").replace("-", "_")
-            )
+        requested_module = os.environ.get("YOUTUBE_DL", "").replace("-", "_")
+        if requested_module in YDL_MODULES:
+            ydl_module = importlib.import_module(requested_module)
         else:
             for module in YDL_MODULES:
                 try:
@@ -58,6 +59,20 @@ class YdlHandler:
 
         self.ydl_module_name = ydl_module.__name__.replace("_", "-")
         self.ydl_website = get_ydl_website(self.ydl_module_name)
+
+        # Resolve the executable so Popen can find it on all platforms (including
+        # Windows where user-installed scripts may not be on the subprocess PATH).
+        exe = shutil.which(self.ydl_module_name)
+        if exe:
+            self.ydl_cmd = [exe]
+        else:
+            # Fall back to running as a Python module: `python -m yt_dlp`
+            self.ydl_cmd = [sys.executable, "-m", ydl_module.__name__]
+            print(
+                "Warning: '{}' not found on PATH, falling back to '{}'".format(
+                    self.ydl_module_name, " ".join(self.ydl_cmd)
+                )
+            )
 
         self.ydls_version = os.environ.get("YDLS_VERSION", "")
         self.ydls_release_date = os.environ.get("YDLS_RELEASE_DATE", "")
@@ -231,7 +246,7 @@ class YdlHandler:
         return 0, [json.loads(s) for s in stdout.decode().strip().split("\n")]
 
     def get_ydl_full_cmd(self, opt_dict, url, extra_opts=None):
-        cmd = [self.ydl_module_name]
+        cmd = list(self.ydl_cmd)
         if opt_dict is not None:
             for key, val in opt_dict.items():
                 if isinstance(val, bool) and not val:

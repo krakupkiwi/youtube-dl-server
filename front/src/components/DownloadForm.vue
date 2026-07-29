@@ -34,6 +34,11 @@ export default {
     showAdvancedOptions: false,
     toasts: [],
     advancedCollapse: null,
+    currentUrl: '',
+    playlistInfo: null,
+    playlistLoading: false,
+    playlistDebounceTimer: null,
+    showPlaylistEntries: false,
   }),
   mounted() {
     this.extractorsModal = new Modal(this.$refs.extractorsModalEl);
@@ -70,7 +75,10 @@ export default {
     visibleExtractors() {
       if (this.extractorsFilter) return this.filteredExtractors;
       return this.filteredExtractors.slice(0, this.extractorsPageSize);
-    }
+    },
+    isPlaylistUrl() {
+      return /[?&]list=PL[A-Za-z0-9_-]+/.test(this.currentUrl.trim());
+    },
   },
   watch: {
     '$route.query': {
@@ -82,6 +90,14 @@ export default {
     },
     extractorsPageSize() {
       this.$nextTick(() => this.setupScrollObserver());
+    },
+    currentUrl(val) {
+      this.playlistInfo = null;
+      this.showPlaylistEntries = false;
+      clearTimeout(this.playlistDebounceTimer);
+      if (/[?&]list=PL[A-Za-z0-9_-]+/.test(val.trim())) {
+        this.playlistDebounceTimer = setTimeout(() => this.fetchPlaylistInfo(), 600);
+      }
     },
   },
   methods: {
@@ -139,6 +155,26 @@ export default {
       if (!this.showAdvancedOptions && this.selectedAliases.length) {
         this.showAdvancedOptions = true;
         this.$nextTick(() => this.advancedCollapse.show());
+      }
+    },
+    async fetchPlaylistInfo() {
+      this.playlistLoading = true;
+      const url = getAPIUrl('api/playlist/info', import.meta.env);
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: this.currentUrl.trim() }),
+        });
+        if (response.ok) {
+          this.playlistInfo = await response.json();
+        } else {
+          this.playlistInfo = null;
+        }
+      } catch (e) {
+        this.playlistInfo = null;
+      } finally {
+        this.playlistLoading = false;
       }
     },
     async inspectVideo() {
@@ -218,6 +254,7 @@ export default {
         .then(data => {
           this.showToast(data.success ? (this.$refs.urlBox.value + " added to the list.") : data.error, data.success);
           this.$refs.urlBox.value = '';
+          this.currentUrl = '';
           this.downloadName = '';
           this.selectedAliases = [];
         })
@@ -268,7 +305,7 @@ export default {
 
     <div class="input-group mb-2">
       <input name="url" type="url" class="form-control" placeholder="URL" aria-label="URL"
-        @keydown.enter.exact.prevent="submitVideo()" ref="urlBox" autocomplete="off" />
+        @keydown.enter.exact.prevent="submitVideo()" ref="urlBox" autocomplete="off" v-model="currentUrl" />
       <select class="custom-select" name="format" ref="selectedFormat" @change="updateUrlParameterFormat($event.target.value)">
         <optgroup v-for="category, category_name in formats.ydl_formats" :label="category_name">
           <option v-for="format_name, format in category" :value="format" :selected="default_format == format">
@@ -277,8 +314,34 @@ export default {
         </optgroup>
       </select>
     </div>
+
+    <div v-if="isPlaylistUrl" class="playlist-strip mb-3 p-2 border rounded text-start">
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge bg-danger">Playlist</span>
+        <span v-if="playlistLoading" class="text-muted small">
+          <span class="spinner-border spinner-border-sm" role="status"></span> Fetching playlist info…
+        </span>
+        <span v-else-if="playlistInfo" class="fw-semibold text-truncate" style="max-width: 60%;">
+          {{ playlistInfo.title }}
+        </span>
+        <span v-if="playlistInfo" class="text-muted small ms-1">
+          · {{ playlistInfo.video_count }} video{{ playlistInfo.video_count !== 1 ? 's' : '' }}
+        </span>
+        <button v-if="playlistInfo && playlistInfo.entries.length"
+          class="btn btn-link btn-sm p-0 ms-auto text-decoration-none"
+          @click="showPlaylistEntries = !showPlaylistEntries">
+          {{ showPlaylistEntries ? 'Hide' : 'Preview' }} ▾
+        </button>
+      </div>
+      <div v-if="showPlaylistEntries && playlistInfo" class="mt-2 playlist-entries">
+        <div v-for="(entry, i) in playlistInfo.entries" :key="entry.url" class="text-muted small text-truncate">
+          {{ i + 1 }}. {{ entry.title }}
+        </div>
+      </div>
+    </div>
+
     <div class="d-flex gap-2 justify-content-center mb-3">
-      <button class="btn btn-primary" @click="submitVideo">Download</button>
+      <button class="btn btn-primary" @click="submitVideo">{{ isPlaylistUrl ? 'Download Playlist' : 'Download' }}</button>
       <button class="btn btn-secondary" @click="inspectVideo" :disabled="loading">
         <span v-if="!loading">Inspect</span>
         <span v-else>
@@ -367,7 +430,18 @@ export default {
                   </b>
                 </span>
                 <br /><br />
-                <b v-if="get(metadata, '_type', '') === 'playlist'">Playlist</b>
+                <span v-if="get(metadata, '_type', '') === 'playlist'" class="d-flex align-items-center gap-2 mb-2">
+                  <b>Playlist</b>
+                  <span class="text-muted small">· {{ get(metadata, 'entries', []).length }} videos</span>
+                  <button class="btn btn-sm btn-success ms-auto"
+                    @click="() => { queueVideo(get(metadata, 'webpage_url'), { format: $refs.selectedFormat.value }) }">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="bi bi-download me-1" viewBox="0 0 16 16">
+                      <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                      <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+                    </svg>
+                    Queue All
+                  </button>
+                </span>
                 <b v-else>Available formats:</b>
                 <br /><br />
                 <span class="list-group" v-if="get(metadata, '_type', '') === 'playlist'">
@@ -402,3 +476,17 @@ export default {
     </Teleport>
   </div>
 </template>
+
+<style scoped>
+.playlist-strip {
+  border-color: var(--bs-danger-border-subtle, #f5c2c7) !important;
+  background-color: var(--bs-danger-bg-subtle, #f8d7da);
+  color: var(--bs-danger-text-emphasis, #58151c);
+}
+
+.playlist-entries {
+  max-height: 200px;
+  overflow-y: auto;
+  padding-left: 0.25rem;
+}
+</style>

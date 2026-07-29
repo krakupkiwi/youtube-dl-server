@@ -6,6 +6,22 @@ from functools import wraps
 
 from ydl_server.config import app_config
 
+
+def _sqlite_uri(path, readonly=False):
+    """Build a valid SQLite URI for both Unix and Windows absolute paths.
+
+    On Unix, paths start with '/' so 'file://' + '/path' gives 'file:///path' (correct).
+    On Windows, paths start with a drive letter e.g. 'C:/path', so we prepend a '/'
+    to get 'file:///C:/path' — the empty-authority form required by the SQLite URI spec.
+    """
+    path = path.replace("\\", "/")
+    if len(path) > 1 and path[1] == ":":
+        path = "/" + path
+    uri = "file://{}".format(path)
+    if readonly:
+        uri += "?mode=ro"
+    return uri
+
 STATUS_NAME = ["Running", "Completed", "Failed", "Pending", "Aborted"]
 
 SCHEMA_VERSION = 3
@@ -81,7 +97,7 @@ class JobsDB:
     @staticmethod
     def init():
         conn = sqlite3.connect(
-            "file://%s" % app_config["ydl_server"].get("metadata_db_path"), uri=True
+            _sqlite_uri(app_config["ydl_server"].get("metadata_db_path")), uri=True
         )
         try:
             version = JobsDB.db_version(conn)
@@ -237,11 +253,7 @@ class JobsDB:
 
     def __init__(self, readonly=True):
         self.conn = sqlite3.connect(
-            "file://%s%s"
-            % (
-                app_config["ydl_server"].get("metadata_db_path"),
-                "?mode=ro" if readonly else "",
-            ),
+            _sqlite_uri(app_config["ydl_server"].get("metadata_db_path"), readonly=readonly),
             uri=True,
         )
 
