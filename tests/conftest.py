@@ -19,6 +19,13 @@ _tmp_dir = tempfile.mkdtemp(prefix="ydl-server-tests-")
 _downloads_dir = os.path.join(_tmp_dir, "downloads")
 os.makedirs(_downloads_dir, exist_ok=True)
 
+# ydl_server/static/ is gitignored: it's normally populated by the frontend
+# build step (see Dockerfile), but ydl_server.routes requires the directory
+# to exist just to import (StaticFiles raises otherwise). Ensure it exists
+# so tests work on a clean checkout without a frontend build.
+_static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "ydl_server", "static")
+os.makedirs(_static_dir, exist_ok=True)
+
 _test_config = {
     "ydl_server": {
         "port": 8080,
