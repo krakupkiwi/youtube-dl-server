@@ -6,11 +6,11 @@ Check items off as they land; each links back to the file(s) involved.
 
 ## Phase 1 — Quick, safe fixes (no dependencies, do first)
 
-- [ ] Fix mutable default argument `extra_params={}` in `Job.__init__` (`ydl_server/db.py:57`)
-- [ ] Remove/fix dead code in `get_ydl_website`: `getattr(info, "home-page", ...)` can never match a real attribute (`ydl_server/ydlhandler.py:31`)
-- [ ] Harden `api_cut_file` output-path validation to also reject backslashes and null bytes, not just `/` and leading `.` (`ydl_server/views.py:112`)
-- [ ] Verify the stored PID actually belongs to the expected process before `os.kill` in `api_jobs_stop`, to avoid killing a reused PID (`ydl_server/views.py:219-225`)
-- [ ] Give `api_jobs_stop`/`api_jobs_retry` a `message`/`error` field on failure, matching `api_delete_file`'s pattern (`ydl_server/views.py`)
+- [x] Fix mutable default argument `extra_params={}` in `Job.__init__` (`ydl_server/db.py:57`)
+- [x] Remove/fix dead code in `get_ydl_website`: `getattr(info, "home-page", ...)` can never match a real attribute (`ydl_server/ydlhandler.py:31`)
+- [x] Harden `api_cut_file` output-path validation to also reject backslashes and null bytes, not just `/` and leading `.` (`ydl_server/views.py:112`)
+- [x] Verify the stored PID actually belongs to the expected process before `os.kill` in `api_jobs_stop`, to avoid killing a reused PID (`ydl_server/views.py:219-225`) — implemented via a live Popen registry in `YdlHandler` (`ydlhandler.py`); also fixed a real Windows `SIGINT` bug this surfaced
+- [x] Give `api_jobs_stop`/`api_jobs_retry` a `message`/`error` field on failure, matching `api_delete_file`'s pattern (`ydl_server/views.py`)
 
 ## Phase 2 — Regression test safety net (before refactoring anything below)
 
