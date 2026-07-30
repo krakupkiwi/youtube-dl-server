@@ -16,6 +16,7 @@ routes = [
     Route("/api/info", views.api_server_info, name="api_server_info"),
     Route("/api/downloads/stats", views.api_queue_size, name="api_queue_size"),
     Route("/api/downloads", views.api_logs, name="api_logs"),
+    Route("/api/downloads/stream", views.api_logs_stream, name="api_logs_stream"),
     Route("/api/downloads/clean", views.api_logs_clean, name="api_logs_clean"),
     Route(
         "/api/downloads",

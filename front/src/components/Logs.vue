@@ -8,7 +8,7 @@ export default {
   data: () => ({
     logs: [],
     showLogDetails: true,
-    mounted: false,
+    eventSource: null,
     statusToTrClass: {
       Pending: 'badge bg-secondary',
       Failed: 'badge bg-danger',
@@ -21,22 +21,26 @@ export default {
     currentLogDetailsModal: null,
     currentLogDetailId: null,
     status: null,
+    selectedIds: [],
   }),
   watch: {
     '$route'() {
       this.status = this.$route.query.status;
-      this.fetchLogs(true);
-    }
+      this.connectStream();
+    },
+    logs() {
+      const ids = new Set(this.logs.map(log => log.id));
+      this.selectedIds = this.selectedIds.filter(id => ids.has(id));
+    },
   },
   mounted() {
     this.currentLogDetailsModal = new Modal('#currentLogDetailsModal');
     this.showLogDetails = getConfig('showLogDetails', 'true') === 'true';
-    this.mounted = true;
     this.status = this.$route.query.status;
-    this.fetchLogs();
+    this.connectStream();
   },
   unmounted() {
-    this.mounted = false;
+    this.disconnectStream();
   },
   computed: {
     getLogById: function () {
@@ -49,7 +53,10 @@ export default {
         }, this.sortOrder)
       }
       return orderBy(this.logs, this.sortBy, this.sortOrder)
-    }
+    },
+    allSelected() {
+      return this.orderedLogs.length > 0 && this.orderedLogs.every(log => this.selectedIds.includes(log.id));
+    },
   },
   methods: {
     toggleSort(field) {
@@ -63,6 +70,35 @@ export default {
     getFormatBadgeClass(format) {
       return format?.startsWith('profile/') ? 'badge bg-warning me-1' : 'badge bg-success me-1'
     },
+    toggleSelected(jobId) {
+      const idx = this.selectedIds.indexOf(jobId);
+      if (idx === -1) {
+        this.selectedIds.push(jobId);
+      } else {
+        this.selectedIds.splice(idx, 1);
+      }
+    },
+    toggleSelectAll() {
+      if (this.allSelected) {
+        this.selectedIds = [];
+      } else {
+        this.selectedIds = this.orderedLogs.map(log => log.id);
+      }
+    },
+    async bulkRetry() {
+      await Promise.allSettled(this.selectedIds.map(id =>
+        fetch(getAPIUrl(`api/jobs/${id}/retry`, import.meta.env), { method: 'POST' })
+      ));
+      this.selectedIds = [];
+      this.fetchLogs();
+    },
+    async bulkDelete() {
+      await Promise.allSettled(this.selectedIds.map(id =>
+        fetch(getAPIUrl(`api/jobs/${id}`, import.meta.env), { method: 'DELETE' })
+      ));
+      this.selectedIds = [];
+      this.fetchLogs();
+    },
     showCurrentLogDetails(logId) {
       this.currentLogDetailId = logId
       this.currentLogDetailsModal.show();
@@ -72,14 +108,14 @@ export default {
       fetch(url, {
         method: 'POST'
       })
-      this.fetchLogs(true)
+      this.fetchLogs()
     },
     retryDownload(job_id) {
       const apiurl = getAPIUrl(`api/jobs/${job_id}/retry`, import.meta.env);
       fetch(apiurl, {
         method: 'POST'
       }).then(() => {
-        this.fetchLogs(true);
+        this.fetchLogs();
       })
     },
     deleteLog(job_id) {
@@ -87,7 +123,7 @@ export default {
       fetch(apiurl, {
         method: 'DELETE'
       }).then(() => {
-        this.fetchLogs(true);
+        this.fetchLogs();
       })
     },
     purgeLogs() {
@@ -98,9 +134,9 @@ export default {
           'Content-Type': 'application/json'
         }
       })
-      this.fetchLogs(true)
+      this.fetchLogs()
     },
-    async fetchLogs(once = false) {
+    async fetchLogs() {
       const url = getAPIUrl(`api/downloads?${this.status ? 'status=' + this.status : ''}`, import.meta.env);
       try {
         const response = await fetch(url);
@@ -108,12 +144,24 @@ export default {
         this.logs = await response.json();
       } catch (error) {
         console.error(error);
-      } finally {
-        if (!once && this.mounted) {
-          setTimeout(() => {
-            this.fetchLogs()
-          }, 5000)
-        }
+      }
+    },
+    connectStream() {
+      this.disconnectStream();
+      const url = getAPIUrl(`api/downloads/stream?${this.status ? 'status=' + this.status : ''}`, import.meta.env);
+      this.eventSource = new EventSource(url);
+      this.eventSource.onmessage = (event) => {
+        this.logs = JSON.parse(event.data);
+      };
+      this.eventSource.onerror = () => {
+        // EventSource retries the connection on its own; nothing to do here.
+        console.error('Logs stream connection error, retrying...');
+      };
+    },
+    disconnectStream() {
+      if (this.eventSource) {
+        this.eventSource.close();
+        this.eventSource = null;
       }
     },
   }
@@ -147,10 +195,18 @@ export default {
             </ul>
           </div>
         </div>
+        <div v-if="selectedIds.length" class="d-flex justify-content-center align-items-center gap-2 mb-3">
+          <span class="text-muted">{{ selectedIds.length }} selected</span>
+          <button class="btn btn-sm btn-outline-primary" @click="bulkRetry">Retry selected</button>
+          <button class="btn btn-sm btn-outline-danger" @click="bulkDelete">Delete selected</button>
+        </div>
         <div class="table-responsive">
           <table class="table table-striped table-hover">
             <thead>
               <tr>
+                <th class="col-select">
+                  <input type="checkbox" aria-label="Select all jobs" :checked="allSelected" @click.stop="toggleSelectAll" />
+                </th>
                 <th class="sortable-header col-hide-mobile" role="button" tabindex="0"
                   :aria-sort="sortBy === 'last_update' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'"
                   @click="toggleSort('last_update')" @keydown.enter="toggleSort('last_update')" @keydown.space.prevent="toggleSort('last_update')">
@@ -188,11 +244,14 @@ export default {
             </thead>
             <tbody id="job_logs">
               <tr v-if="logs.length === 0">
-                <td :colspan="showLogDetails ? 5 : 4">No {{ status == null ? '' : status.toLowerCase() + ' ' }}jobs found</td>
+                <td :colspan="showLogDetails ? 6 : 5">No {{ status == null ? '' : status.toLowerCase() + ' ' }}jobs found</td>
               </tr>
               <tr @click="showCurrentLogDetails(log.id)" @keydown.enter="showCurrentLogDetails(log.id)"
                 role="button" tabindex="0"
                 v-for="log in orderedLogs" :key="log.id" style="cursor: pointer;">
+                <td @click.stop>
+                  <input type="checkbox" :aria-label="`Select job ${log.name}`" :checked="selectedIds.includes(log.id)" @click.stop="toggleSelected(log.id)" />
+                </td>
                 <td class="col-hide-mobile">{{ log.last_update }}</td>
                 <td class="col-name">{{ log.name }}</td>
                 <td><span v-for='fmt in log.format?.split(",")' :class=getFormatBadgeClass(fmt)>{{ fmt }}</span></td>

@@ -1,4 +1,4 @@
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 from pathlib import Path
 from ydl_server.config import (
@@ -9,6 +9,8 @@ from ydl_server.config import (
     resolve_finished_file,
 )
 from ydl_server.db import JobsDB, Job, Actions, JobType
+import asyncio
+import json
 import logging
 import os
 import re
@@ -29,7 +31,13 @@ def parse_timestamp(ts):
 MAX_TREE_DEPTH = 32
 
 
-def build_finished_tree(root_dir, seen=None, depth=0):
+def build_finished_tree(root_dir, seen=None, depth=0, max_depth=0):
+    """List root_dir's contents, recursing at most max_depth levels.
+
+    Directories beyond max_depth get children=None ("not yet loaded" - the
+    frontend lazily fetches them via ?path= on expand) rather than eagerly
+    walking the entire tree in one response.
+    """
     try:
         entries = list(os.scandir(root_dir))
     except OSError as e:
@@ -49,15 +57,15 @@ def build_finished_tree(root_dir, seen=None, depth=0):
             logger.error("Error accessing %s - %s", entry.path, e)
         children = None
         if is_dir:
-            children = []
             key = (stat.st_dev, stat.st_ino) if stat else None
             if (
-                depth < MAX_TREE_DEPTH
+                depth < max_depth
+                and depth < MAX_TREE_DEPTH
                 and key not in seen
                 and resolve_finished_file(entry.path) is not None
             ):
                 seen.add(key)
-                children = build_finished_tree(entry.path, seen, depth + 1)
+                children = build_finished_tree(entry.path, seen, depth + 1, max_depth)
         file_info = {
             "name": entry.name,
             "modified": stat.st_mtime if stat else None,
@@ -71,7 +79,14 @@ def build_finished_tree(root_dir, seen=None, depth=0):
 
 
 async def api_finished(request):
-    return JSONResponse(build_finished_tree(Path(get_finished_path())))
+    path = request.query_params.get("path")
+    root_dir = Path(get_finished_path())
+    if path:
+        resolved = resolve_finished_file(path)
+        if resolved is None or not os.path.isdir(resolved):
+            return JSONResponse({"success": False, "message": "Invalid directory"}, status_code=400)
+        root_dir = Path(resolved)
+    return JSONResponse(build_finished_tree(root_dir))
 
 
 async def api_delete_file(request):
@@ -191,6 +206,43 @@ async def api_logs(request):
         result = db.get_jobs(limit, status)
     db.close()
     return JSONResponse(result)
+
+
+async def api_logs_stream(request):
+    """Server-sent-events stream of the jobs list, replacing client-side polling.
+
+    The server itself still polls the DB on an interval, but only once here
+    regardless of how many browser tabs are connected, and only pushes a new
+    frame when the result actually changed - client tabs get near-instant
+    updates without each of them hitting the DB on their own timer.
+    """
+    limit = app_config["ydl_server"].get("max_log_entries", 100)
+    status = request.query_params.get("status", None)
+    show_logs = request.query_params.get("show_logs", "1") in ["1", "true"]
+
+    async def event_generator():
+        last_payload = None
+        while True:
+            if await request.is_disconnected():
+                break
+            db = JobsDB(readonly=True)
+            try:
+                result = db.get_jobs_with_logs(limit, status) if show_logs else db.get_jobs(limit, status)
+            finally:
+                db.close()
+            payload = json.dumps(result)
+            if payload != last_payload:
+                last_payload = payload
+                yield f"data: {payload}\n\n"
+            else:
+                yield ": heartbeat\n\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 async def api_logs_purge(request):

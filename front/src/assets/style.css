@@ -611,6 +611,10 @@ div.input-group > input.form-control::placeholder {
   vertical-align: middle;
 }
 
+.file-tree-table .col-select {
+  width: 32px;
+}
+
 .file-tree-table .col-action {
   width: 90px;
 }

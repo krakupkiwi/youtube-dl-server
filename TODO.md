@@ -36,9 +36,9 @@ Check items off as they land; each links back to the file(s) involved.
 
 ## Phase 5 — Frontend features (bigger scope, build on Phase 4)
 
-- [ ] Bulk actions: multi-select retry/delete in Logs and Finished views
-- [ ] Replace 5s polling in `Logs.vue` with push updates (SSE or websocket)
-- [ ] Paginate `/api/finished` instead of returning the entire tree in one response
+- [x] Bulk actions: multi-select retry/delete in Logs and Finished views — checkboxes + select-all in `Logs.vue`, checkboxes in `Finished.vue`/`FileTreeItem.vue` (files and directories, threaded through the recursive tree via a `toggle-select` event); both reuse existing single-item endpoints via `Promise.allSettled`, no new backend endpoints needed
+- [x] Replace 5s polling in `Logs.vue` with push updates (SSE or websocket) — added `GET /api/downloads/stream` (Starlette `StreamingResponse`); the server itself still polls the DB on a 1s interval but only once regardless of how many tabs are connected, and only pushes a frame when the payload actually changed. Frontend uses `EventSource`, reconnecting on status-filter changes. Verified live in a browser: a queued job appeared within ~2s with zero manual refresh, and repeated filter switches didn't leak connections.
+- [x] Paginate `/api/finished` instead of returning the entire tree in one response — implemented as **lazy-loading** instead of literal pagination, since it fits hierarchical data better: `/api/finished` (and a new `?path=` param for a specific subdirectory) now returns only one level at a time, with unopened directories marked `children: null`. `FileTreeItem.vue` fetches a directory's contents on first expand and caches the result. Sorting was moved from a single recursive pre-sort in `Finished.vue` into each `FileTreeItem` sorting its own (possibly lazily-loaded) children, so sort order stays correct at every depth regardless of what's been loaded yet.
 
 ## Phase 6 — Community-requested features
 

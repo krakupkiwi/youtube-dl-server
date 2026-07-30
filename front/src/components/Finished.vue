@@ -14,17 +14,41 @@ export default {
     sortOrder: 'desc',
     toasts: [],
     pendingDeleteFile: null,
+    selectedPaths: [],
   }),
   mounted() {
     this.fetchFinished();
   },
   computed: {
     fileTreeOrdered() {
-      return this.buildFileTree(this.finished)
+      return orderBy(this.finished, this.sortBy, this.sortOrder)
     },
   },
 
   methods: {
+    toggleSelected(fullPath) {
+      const idx = this.selectedPaths.indexOf(fullPath);
+      if (idx === -1) {
+        this.selectedPaths.push(fullPath);
+      } else {
+        this.selectedPaths.splice(idx, 1);
+      }
+    },
+    async bulkDelete() {
+      const paths = this.selectedPaths;
+      this.selectedPaths = [];
+      const results = await Promise.allSettled(paths.map(path =>
+        fetch(getAPIUrl(`api/finished/${encodeURIComponent(path)}`), { method: 'DELETE' })
+          .then(r => r.json())
+      ));
+      const failed = results.filter(r => r.status === 'rejected' || !r.value?.success).length;
+      if (failed > 0) {
+        this.showToast(`Deleted ${paths.length - failed} of ${paths.length} selected items; ${failed} failed.`, failed === paths.length ? false : true);
+      } else {
+        this.showToast(`Deleted ${paths.length} selected item${paths.length === 1 ? '' : 's'}.`, true);
+      }
+      this.fetchFinished();
+    },
     cutFinishedFile(file_name) {
       this.$refs.cutModal.open(file_name);
     },
@@ -77,21 +101,6 @@ export default {
         this.showToast(error.message || 'Could not load the finished files list.', false);
       }
     },
-    order(items) {
-      return orderBy(items, this.sortBy, this.sortOrder)
-    },
-    buildFileTree(items, parentPath = '') {
-      const sortedItems = this.order(items);
-      return sortedItems.map(item => {
-        if (item.directory) {
-          return {
-            ...item,
-            children: this.buildFileTree(item.children, `${parentPath}${item.name}/`)
-          }
-        }
-        return item
-      });
-    },
     setSort(field) {
       if (this.sortBy === field) {
         this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
@@ -119,10 +128,15 @@ export default {
           <button class="btn btn-secondary" @click="fetchFinished" title="Refresh"><SvgIcon name="refresh" /></button>
         </div>
       </div>
+      <div v-if="selectedPaths.length" class="d-flex justify-content-center align-items-center gap-2 mb-2">
+        <span class="text-muted">{{ selectedPaths.length }} selected</span>
+        <button class="btn btn-sm btn-outline-danger" @click="bulkDelete">Delete selected</button>
+      </div>
       <div class="table-responsive">
         <table class="table file-tree-table text-left">
           <thead>
             <tr>
+              <th class="col-select"></th>
               <th class="col-action">Action</th>
               <th class="sortable-header" role="button" tabindex="0"
                 :aria-sort="sortBy === 'name' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'"
@@ -149,11 +163,12 @@ export default {
 
           <tbody v-if="fileTreeOrdered.length > 0">
             <FileTreeItem v-for="item in fileTreeOrdered" :key="item.name" :item="item" :depth="0"
-              @delete="deleteFinishedFile" @cut="cutFinishedFile" />
+              :selected-paths="selectedPaths" :sort-by="sortBy" :sort-order="sortOrder"
+              @delete="deleteFinishedFile" @cut="cutFinishedFile" @toggle-select="toggleSelected" />
           </tbody>
           <tbody v-else>
             <tr>
-              <td colspan="5" class="text-center text-muted" style="padding: 2rem;">No finished files found.</td>
+              <td colspan="6" class="text-center text-muted" style="padding: 2rem;">No finished files found.</td>
             </tr>
           </tbody>
         </table>
