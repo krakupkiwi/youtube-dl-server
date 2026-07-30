@@ -21,7 +21,7 @@ export default {
 
 <template>
   <div class="content">
-    <div class="container text-center" style="padding-top: 4rem;">
+    <div class="container text-center">
       <h1 class="display-4">{{ server_info.ydl_module_name }}</h1>
       <p class="lead">Enter a video URL to download the video to the server. URL can be to YouTube or <a
           href="#" @click.prevent="showExtractorsModal">any
@@ -30,3 +30,13 @@ export default {
     </div>
   </div>
 </template>
+
+<style scoped>
+.content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 2rem 0;
+}
+</style>

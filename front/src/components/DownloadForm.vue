@@ -343,9 +343,9 @@ export default {
       </div>
     </div>
 
-    <div class="d-flex gap-2 justify-content-center mb-3">
-      <button class="btn btn-primary" @click="submitVideo">{{ isPlaylistUrl ? 'Download Playlist' : 'Download' }}</button>
-      <button class="btn btn-secondary" @click="inspectVideo" :disabled="loading">
+    <div class="d-flex gap-2 justify-content-center align-items-center mb-3">
+      <button class="btn btn-primary btn-lg" @click="submitVideo">{{ isPlaylistUrl ? 'Download Playlist' : 'Download' }}</button>
+      <button class="btn btn-outline-secondary" @click="inspectVideo" :disabled="loading">
         <span v-if="!loading">Inspect</span>
         <span v-else>
           <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
@@ -360,22 +360,24 @@ export default {
       </button>
       <div class="collapse mt-2" ref="advancedCollapseEl">
         <div class="p-3 border rounded advanced-options-panel">
-          <div class="form-check mb-2">
-            <input class="form-check-input" type="checkbox" :id="'forceGenericExtractor-' + uid" v-model="forceGenericExtractor">
-            <label class="form-check-label" :for="'forceGenericExtractor-' + uid">
-              Force generic extractor
-            </label>
+          <div class="advanced-options-section">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" :id="'forceGenericExtractor-' + uid" v-model="forceGenericExtractor">
+              <label class="form-check-label" :for="'forceGenericExtractor-' + uid">
+                Force generic extractor
+              </label>
+            </div>
           </div>
-          <div class="mb-2" v-if="Object.keys(aliases).length">
-            <label class="form-label">Option groups:</label>
+          <div class="advanced-options-section" v-if="Object.keys(aliases).length">
+            <div class="advanced-options-section-label">Option groups</div>
             <div class="form-check" v-for="alias_name, alias in aliases" :key="alias">
               <input class="form-check-input" type="checkbox" :id="'alias-' + alias + '-' + uid"
                 :value="alias" v-model="selectedAliases">
               <label class="form-check-label" :for="'alias-' + alias + '-' + uid">{{ alias_name }}</label>
             </div>
           </div>
-          <div class="mb-2">
-            <label :for="'downloadName-' + uid" class="form-label">Override video title:</label>
+          <div class="advanced-options-section">
+            <label :for="'downloadName-' + uid" class="advanced-options-section-label mb-0">Override video title</label>
             <input type="text" class="form-control" :id="'downloadName-' + uid" v-model="downloadName" placeholder="Force a title for the video">
           </div>
         </div>
@@ -491,5 +493,27 @@ export default {
   max-height: 200px;
   overflow-y: auto;
   padding-left: 0.25rem;
+}
+
+.advanced-options-section {
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--t-border);
+}
+
+.advanced-options-section:last-child {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: none;
+}
+
+.advanced-options-section-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--t-text-muted);
+  margin-bottom: 0.5rem;
 }
 </style>

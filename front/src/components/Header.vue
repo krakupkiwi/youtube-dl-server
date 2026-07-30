@@ -3,6 +3,7 @@ import { getAPIUrl } from '../utils';
 import { map, capitalize } from 'lodash'
 import { inject } from 'vue'
 import QuickDownloadModal from './QuickDownloadModal.vue'
+import SvgIcon from './SvgIcon.vue'
 
 const theme = inject('theme')
 const toggleTheme = inject('toggleTheme')
@@ -61,25 +62,37 @@ export default {
           <div class="stats-bar d-flex align-items-center gap-2 flex-wrap">
             <router-link to="/logs?status=PENDING">
               <span v-if="stats.queue === stats.pending" title="Pending"
-                id='queue_pending_size' class="badge bg-secondary">{{ stats.queue }}</span>
+                id='queue_pending_size' class="badge bg-secondary stat-badge">
+                <SvgIcon name="clock" size="12" /> {{ stats.queue }}
+              </span>
               <span v-else title="Pending" id='queue_pending_size'
-                class="badge bg-secondary">{{ stats.queue }} | {{ stats.pending }}</span>
+                class="badge bg-secondary stat-badge">
+                <SvgIcon name="clock" size="12" /> {{ stats.queue }} | {{ stats.pending }}
+              </span>
             </router-link>
             <router-link to="/logs?status=RUNNING">
               <span title="Running / Total Workers" id='running_size'
-                class="badge bg-info">{{ stats.running }}/{{ server_info.download_workers_count }}</span>
+                class="badge bg-info stat-badge">
+                <SvgIcon name="arrow-repeat" size="12" /> {{ stats.running }}/{{ server_info.download_workers_count }}
+              </span>
             </router-link>
             <router-link to="/logs?status=COMPLETED">
               <span title="Completed" id='completed_size'
-                class="badge bg-success">{{ stats.completed }}</span>
+                class="badge bg-success stat-badge">
+                <SvgIcon name="check-circle" size="12" /> {{ stats.completed }}
+              </span>
             </router-link>
             <router-link to="/logs?status=ABORTED">
               <span title="Aborted" id='aborted_size'
-                class="badge bg-warning">{{ stats.aborted }}</span>
+                class="badge bg-warning stat-badge">
+                <SvgIcon name="dash-circle" size="12" /> {{ stats.aborted }}
+              </span>
             </router-link>
             <router-link to="/logs?status=FAILED">
               <span title="Failed" id='failed_size'
-                class="badge bg-danger">{{ stats.failed }}</span>
+                class="badge bg-danger stat-badge">
+                <SvgIcon name="x-circle" size="12" /> {{ stats.failed }}
+              </span>
             </router-link>
           </div>
           <QuickDownloadModal />
@@ -96,3 +109,11 @@ export default {
     </nav>
   </header>
 </template>
+
+<style scoped>
+.stat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+</style>
