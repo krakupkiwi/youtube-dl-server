@@ -19,5 +19,9 @@ function getConfig(key, defaultValue) {
 	return localStorage.getItem(key) || defaultValue;
 }
 
+function getApiKey() {
+	return getConfig('apiKey', '');
+}
 
-export { getAPIUrl, saveConfig, getConfig };
+
+export { getAPIUrl, saveConfig, getConfig, getApiKey };

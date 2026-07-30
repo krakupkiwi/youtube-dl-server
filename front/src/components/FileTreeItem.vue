@@ -42,7 +42,7 @@
         <input type="checkbox" :aria-label="`Select ${item.name}`" :checked="isSelected" @click.stop="$emit('toggle-select', fullPath)" />
       </td>
       <td class="col-action file-tree-actions">
-        <a :href="`api/finished/${encodeURIComponent(fullPath)}`" download>
+        <a :href="downloadUrl" download>
           <SvgIcon name="download" color="var(--bs-teal)" size="14" />
         </a>
         <a v-if="isMedia" href="#" @click.prevent="$emit('cut', item.name)" style="cursor: pointer;" title="Cut">
@@ -52,7 +52,7 @@
           <SvgIcon name="trash" color="var(--bs-red)" size="14" />
         </a>
       </td>
-      <td :style="{ paddingLeft: (depth * 1.5 + 0.75) + 'rem' }">{{ depth > 0 ? '\u21b3 ' : ''}}<a :href="`api/finished/${encodeURIComponent(fullPath)}`">{{ item.name }}</a></td>
+      <td :style="{ paddingLeft: (depth * 1.5 + 0.75) + 'rem' }">{{ depth > 0 ? '\u21b3 ' : ''}}<a :href="downloadUrl">{{ item.name }}</a></td>
       <td class="col-size">{{ prettySize(item.size) }}</td>
       <td class="col-date">{{ formatDate(item.modified) }}</td>
       <td class="col-date">{{ formatDate(item.created) }}</td>
@@ -61,7 +61,7 @@
 
 <script>
 import { orderBy } from 'lodash'
-import { getAPIUrl } from '../utils'
+import { getAPIUrl, getApiKey } from '../utils'
 import SvgIcon from './SvgIcon.vue'
 
 export default {
@@ -89,6 +89,11 @@ export default {
   computed: {
     fullPath() {
       return this.parentPath ? `${this.parentPath}/${this.item.name}` : this.item.name
+    },
+    downloadUrl() {
+      const apiKey = getApiKey();
+      const suffix = apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : '';
+      return `api/finished/${encodeURIComponent(this.fullPath)}${suffix}`;
     },
     isSelected() {
       return this.selectedPaths.includes(this.fullPath)

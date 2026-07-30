@@ -15,6 +15,7 @@ from ydl_server.db import JobsDB
 from ydl_server.ydlhandler import YdlHandler
 from ydl_server.jobshandler import JobsHandler
 from ydl_server.config import app_config
+from ydl_server.middleware import APIKeyMiddleware
 
 from ydl_server.routes import routes
 
@@ -27,6 +28,10 @@ if __name__ == "__main__":
     JobsDB.init()
 
     middleware = [Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"])]
+    api_key = app_config["ydl_server"].get("api_key")
+    if api_key:
+        middleware.append(Middleware(APIKeyMiddleware, api_key=api_key))
+        logger.info("API key protection enabled for /api/ routes")
 
     app = Starlette(
         routes=routes,

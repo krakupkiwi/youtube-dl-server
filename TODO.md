@@ -49,6 +49,6 @@ Check items off as they land; each links back to the file(s) involved.
 
 ## Phase 7 — Ops, security, docs (lowest urgency, do last)
 
-- [ ] Optional API-key middleware toggle for deployments not sitting behind a reverse proxy
-- [ ] Document supported Docker platforms / update mechanism in README
-- [ ] Add a "recipes" section to README for common format-customization asks (e.g. forcing H264+AAC mp4)
+- [x] Optional API-key middleware toggle for deployments not sitting behind a reverse proxy — `ydl_server/middleware.py`'s `APIKeyMiddleware`, config-gated and off by default. Accepts the key via `X-API-Key` header or `api_key` query param (the latter needed for EventSource/download links, which can't set custom headers). Frontend picks up `?api_key=` from the URL once, persists it to `localStorage`, strips it from the address bar, and patches `window.fetch` to attach it everywhere. Verified live end-to-end: 401 without a key, working app with the key, key correctly appended to the SSE stream URL and file download links.
+- [x] Document supported Docker platforms / update mechanism in README — the Dockerfile already special-cased `linux/arm/v7`, but `ci.yml` was only building for the runner's native `linux/amd64`; added QEMU + `platforms: linux/amd64,linux/arm64,linux/arm/v7` so the published image actually matches what's documented. Added "This fork's image" and "Updating" sections.
+- [x] Add a "recipes" section to README for common format-customization asks (e.g. forcing H264+AAC mp4) — five recipes (H264/AAC mp4, resolution cap, subtitles, bandwidth limit, audio extraction), every format selector and flag verified directly against real yt-dlp before writing it down (caught one real mistake: `ratelimit` isn't a valid flag, the correct one is `limit-rate`).

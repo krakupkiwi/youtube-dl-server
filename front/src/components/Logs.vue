@@ -1,7 +1,7 @@
 <script setup>
 import { orderBy, capitalize } from 'lodash'
 import { Modal } from 'bootstrap'
-import { getAPIUrl, saveConfig, getConfig } from '../utils';
+import { getAPIUrl, saveConfig, getConfig, getApiKey } from '../utils';
 </script>
 <script>
 export default {
@@ -148,7 +148,11 @@ export default {
     },
     connectStream() {
       this.disconnectStream();
-      const url = getAPIUrl(`api/downloads/stream?${this.status ? 'status=' + this.status : ''}`, import.meta.env);
+      const params = new URLSearchParams();
+      if (this.status) params.set('status', this.status);
+      const apiKey = getApiKey();
+      if (apiKey) params.set('api_key', apiKey);
+      const url = getAPIUrl(`api/downloads/stream?${params.toString()}`, import.meta.env);
       this.eventSource = new EventSource(url);
       this.eventSource.onmessage = (event) => {
         this.logs = JSON.parse(event.data);

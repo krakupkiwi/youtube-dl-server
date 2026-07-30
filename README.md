@@ -54,6 +54,35 @@ This is an example service definition that could be put in `docker-compose.yml`.
     restart: always
 ```
 
+### This fork's image
+
+This fork publishes its own image to GHCR on every push to `master`
+(`.github/workflows/ci.yml`), built for `linux/amd64`, `linux/arm64`, and
+`linux/arm/v7` (matching the platforms the Dockerfile itself already
+special-cases, e.g. skipping the `deno` install on 32-bit ARM):
+
+```shell
+docker pull ghcr.io/krakupkiwi/youtube-dl-server:latest
+```
+
+Use it anywhere the examples above reference `nbr23/youtube-dl-server` -
+same volumes, same config, same tags (`:latest`/`:yt-dlp`).
+
+### Updating
+
+There's no in-app auto-update; pull the new image and recreate the
+container:
+
+```shell
+docker pull ghcr.io/krakupkiwi/youtube-dl-server:latest
+docker compose up -d   # or: docker stop/rm + docker run again for the CLI form
+```
+
+For unattended updates, a tool like
+[Watchtower](https://containrrr.dev/watchtower/) can poll and recreate the
+container automatically. On Unraid, the Docker tab's "Check for Updates" /
+"Update" action does the same thing for containers added as templates.
+
 ## Configuration
 
 Configuration is done through the config.yml file at the root of the project.
@@ -87,6 +116,7 @@ In the above case, if `/var/local/youtube-dl-server/config.yml` does not exist, 
 | `forwarded_allow_ips` | `None` | Comma-separated list of IPs to trust proxy headers from (passed to uvicorn) |
 | `proxy_headers` | `True` | Trust `X-Forwarded-Proto`, `X-Forwarded-For`, `X-Forwarded-Port` headers (passed to uvicorn) |
 | `debug` | `False` | Enable debug mode |
+| `api_key` | unset | Require this key on every `/api/` request (see [API key protection](#api-key-protection)) |
 
 Minimum required configuration:
 
@@ -99,6 +129,30 @@ ydl_server:
 ydl_options:
   output: '/youtube-dl/%(title)s [%(id)s].%(ext)s'
   cache-dir: '/youtube-dl/.cache'
+```
+
+### API key protection
+
+By default, every `/api/` route is open to anyone who can reach the server -
+the intended deployment is behind a reverse proxy that already handles access
+control (see [HTTPS](#https) below). For deployments that aren't proxied,
+set `api_key` to require a matching key on every API request:
+
+```yaml
+ydl_server:
+  api_key: 'some-long-random-string'
+```
+
+With this set, the bundled web UI still works: visit the site once with
+`?api_key=some-long-random-string` in the URL, and the frontend stores the
+key in `localStorage`, strips it from the visible address bar, and attaches
+it to every subsequent request (as an `X-API-Key` header for regular calls,
+and as an `api_key` query parameter for the live-updates connection and file
+download links, since browsers don't let those set custom headers). Calling
+the API directly (scripts, curl) needs the same header or query parameter:
+
+```shell
+curl -H 'X-API-Key: some-long-random-string' http://{{host}}:8080/api/info
 ```
 
 ### ydl_options
@@ -249,6 +303,67 @@ extractor_options:
 These act as defaults: they're resolved after the video's metadata is fetched (so the
 server knows which extractor matched), and only fill in keys not already set by the
 selected format, profile, or aliases - an explicit choice made elsewhere always wins.
+
+### Recipes
+
+Common `ydl_options` combinations, added as profiles or aliases (see above) so they're
+selectable from the UI:
+
+**Force H264 video + AAC audio in an MP4 container** - useful for players/devices
+(older smart TVs, some NAS media players) that can't handle VP9/AV1 video or Opus
+audio, which yt-dlp otherwise prefers by default:
+
+```yaml
+aliases:
+  compatible_mp4:
+    name: 'Compatible MP4 (H264/AAC)'
+    ydl_options:
+      format: 'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[vcodec^=avc1][ext=mp4]'
+      merge-output-format: mp4
+```
+
+**Cap resolution** - avoid pulling a 4K stream when 1080p is plenty:
+
+```yaml
+aliases:
+  max_1080p:
+    name: 'Max 1080p'
+    ydl_options:
+      format: 'bestvideo[height<=1080]+bestaudio/best[height<=1080]'
+```
+
+**Always write and embed subtitles:**
+
+```yaml
+aliases:
+  subtitles:
+    name: 'Subtitles'
+    ydl_options:
+      write-sub: True
+      write-auto-sub: True
+      embed-subs: True
+      sub-lang: en
+```
+
+**Throttle download bandwidth** - handy on a connection shared with other traffic:
+
+```yaml
+ydl_options:
+  limit-rate: 5M   # bytes/sec; accepts yt-dlp's usual K/M/G suffixes
+```
+
+**Extract audio only, as a specific format** - the built-in `mp3` alias in the
+default config already covers this; the same shape works for other formats:
+
+```yaml
+aliases:
+  flac:
+    name: 'FLAC audio'
+    ydl_options:
+      format: bestaudio/best
+      extract-audio: True
+      audio-format: flac
+```
 
 ## Python
 
