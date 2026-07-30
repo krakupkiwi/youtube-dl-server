@@ -133,6 +133,32 @@ ydl_options:
 `output` must resolve to a directory other than the filesystem root, otherwise the server
 refuses to start.
 
+### Authentication / cookies for gated videos
+
+Since any yt-dlp flag can be set via `ydl_options` (see above), gated or
+private videos that require a logged-in session can be downloaded by pointing
+yt-dlp at a cookies file:
+
+```yaml
+ydl_options:
+  cookies: '/app_config/cookies.txt'
+```
+
+Export the cookies file from your browser (e.g. with a "Get cookies.txt"
+extension) and mount it alongside your `config.yml` in the `/app_config`
+volume. `cookies-from-browser` also works the same way if the server has
+access to a real browser profile, though this is uncommon in a container:
+
+```yaml
+ydl_options:
+  cookies-from-browser: chrome
+```
+
+This is a credential for the *video sources* yt-dlp downloads from, not a
+login for the youtube-dl-server web UI itself — put youtube-dl-server behind
+a reverse proxy (see [HTTPS](#https) below) if you need to restrict who can
+reach it.
+
 ### Profiles
 
 Profiles are named configuration sets selectable in the UI. Each profile can
@@ -201,6 +227,28 @@ in this order, the last one winning: `ydl_options`, then the profile (its aliase
 listed order, then its own `ydl_options`), then the aliases selected in the form.
 Unknown aliases and recursive `use:` chains are rejected when the configuration is
 loaded, at server startup.
+
+### Per-extractor options
+
+Different sites sometimes need different yt-dlp options - subtitles only make sense
+on some extractors, a site might need a specific format fallback, etc. `extractor_options`
+sets `ydl_options` that only apply when yt-dlp's matched extractor for the URL equals
+the given key (case-insensitive; this is yt-dlp's own `extractor` field, e.g. `youtube`,
+`twitter`, `generic`):
+
+```yaml
+extractor_options:
+  youtube:
+    ydl_options:
+      write-thumbnail: True
+  twitter:
+    ydl_options:
+      format: best
+```
+
+These act as defaults: they're resolved after the video's metadata is fetched (so the
+server knows which extractor matched), and only fill in keys not already set by the
+selected format, profile, or aliases - an explicit choice made elsewhere always wins.
 
 ## Python
 
@@ -329,6 +377,35 @@ curl -X POST \
   -H 'Content-Type: application/json' \
   --data-raw '{"url": "{{URL}}"}' \
   http://{{host}}:8080/api/metadata
+```
+
+#### Check a video's availability and quality
+
+A cheap alternative to `/api/metadata` for scripts that just need to know
+whether a link still resolves and what quality is available, without the
+full formats/thumbnails/subtitles payload - handy for e.g. periodically
+verifying a cookies file hasn't expired.
+
+```shell
+curl -X POST \
+  -H 'Content-Type: application/json' \
+  --data-raw '{"url": "{{URL}}"}' \
+  http://{{host}}:8080/api/check
+```
+
+```json
+{
+  "success": true,
+  "is_playlist": false,
+  "id": "...",
+  "title": "...",
+  "uploader": "...",
+  "duration": 2341,
+  "is_live": false,
+  "availability": "public",
+  "extractor": "youtube",
+  "best_format": {"format_id": "399", "ext": "mp4", "resolution": "1920x1080", "filesize": 40184962}
+}
 ```
 
 #### Stop a job

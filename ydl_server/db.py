@@ -329,6 +329,37 @@ class JobsDB:
         return cursor.rowcount
 
     @with_cursor
+    def get_failed_jobs_for_auto_retry(self, cursor):
+        """Failed jobs marked not_yet_available (see YdlHandler.mark_not_yet_available),
+        with a raw (naive UTC, as stored by SQLite) last_update for age comparison -
+        unlike get_jobs_with_logs, which formats last_update for display in the
+        server's local timezone.
+        """
+        cursor.execute(
+            """
+            SELECT id, name, format, url, extra_params, force_generic_extractor, last_update
+            FROM jobs
+            WHERE status = ?;
+            """,
+            (Job.FAILED,),
+        )
+        rows = []
+        for (job_id, name, format, url, extra_params, force_generic_extractor, last_update) in cursor.fetchall():
+            parsed_extra_params = json.loads(extra_params or "{}")
+            if not parsed_extra_params.get("not_yet_available"):
+                continue
+            rows.append({
+                "id": job_id,
+                "name": name,
+                "format": format,
+                "urls": url.split("\n"),
+                "extra_params": parsed_extra_params,
+                "force_generic_extractor": bool(force_generic_extractor),
+                "last_update": last_update,
+            })
+        return rows
+
+    @with_cursor
     def get_job_by_id(self, cursor, job_id):
         cursor.execute(
             """

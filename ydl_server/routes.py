@@ -42,6 +42,12 @@ routes = [
         name="api_playlist_info",
         methods=["POST"],
     ),
+    Route(
+        "/api/check",
+        views.api_check_video,
+        name="api_check_video",
+        methods=["POST"],
+    ),
     Route("/api/finished", views.api_finished, name="api_finished", methods=["GET"]),
     Route(
         "/api/finished/{fname:path}",

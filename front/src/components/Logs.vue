@@ -255,7 +255,13 @@ export default {
                 <td class="col-hide-mobile">{{ log.last_update }}</td>
                 <td class="col-name">{{ log.name }}</td>
                 <td><span v-for='fmt in log.format?.split(",")' :class=getFormatBadgeClass(fmt)>{{ fmt }}</span></td>
-                <td v-if="log.status == 'Failed' || log.status == 'Aborted'">
+                <td v-if="log.status == 'Failed' && log.extra_params?.not_yet_available">
+                  <span class="badge bg-secondary status-action" @click.stop="retryDownload(log.id)"
+                    title="yt-dlp reported this video isn't available yet (scheduled/upcoming). It will be retried automatically.">
+                    Not available yet / Retry
+                  </span>
+                </td>
+                <td v-else-if="log.status == 'Failed' || log.status == 'Aborted'">
                   <span :class=statusToTrClass[log.status] class="status-action" @click.stop="retryDownload(log.id)">
                     {{ log.status }} / Retry
                   </span>

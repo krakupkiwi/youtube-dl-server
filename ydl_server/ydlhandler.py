@@ -46,6 +46,8 @@ def read_proc_stdout(proc, strio):
 
 DESTINATION_RE = re.compile(r"^\[download\] Destination: (.+)$", re.MULTILINE)
 
+NOT_YET_AVAILABLE_RE = re.compile(r"(will begin in|premieres? in)\s", re.IGNORECASE)
+
 
 def cleanup_partial_downloads(log_text):
     """Remove yt-dlp's .part temp file(s) for a download job that didn't
@@ -226,6 +228,34 @@ class YdlHandler:
             options.update(alias)
         return options
 
+    def get_extractor_options(self, extractor_name):
+        """Look up per-extractor default ydl_options (config's extractor_options section).
+
+        These apply as defaults only - an explicit format/profile/alias/output
+        choice already resolved onto ydl_opts always takes precedence, since
+        the caller merges these in underneath, not over, the existing options.
+        """
+        if not extractor_name:
+            return {}
+        return self.app_config.get("extractor_options", {}).get(
+            extractor_name.lower(), {}
+        ).get("ydl_options", {})
+
+    def mark_not_yet_available(self, job):
+        """Flag a job as failed because the video isn't available yet (an
+        upcoming premiere/live event), rather than a real failure. JobsHandler's
+        background sweep uses this marker to auto-retry the job later instead
+        of leaving it permanently failed.
+        """
+        job.status = Job.FAILED
+        extra_params = dict(job.extra_params or {})
+        extra_params["not_yet_available"] = True
+        extra_params.setdefault("auto_retry_count", 0)
+        job.extra_params = extra_params
+        logger.info(
+            "Job %s not yet available (scheduled/upcoming); will auto-retry later", job.id
+        )
+
     def get_ydl_options(self, ydl_config, request_options):
         ydl_config = ydl_config.copy()
         req_format, req_audio, req_profile, req_aliases = self.get_format_and_profile(request_options.get("format"))
@@ -314,14 +344,28 @@ class YdlHandler:
         rc, metadata = self.fetch_metadata(job.url, force_generic_extractor=force_generic)
         if rc != 0:
             job.log = Job.clean_logs(metadata)
+            if NOT_YET_AVAILABLE_RE.search(metadata):
+                self.mark_not_yet_available(job)
+                return
             job.status = Job.FAILED
             logger.error("Error in metadata fetching process:\n%s", job.log)
             raise Exception(job.log)
+
+        if metadata and metadata[0].get("live_status") == "is_upcoming":
+            job.log = Job.clean_logs(
+                "This video is not available yet (scheduled/upcoming). Will retry automatically."
+            )
+            self.mark_not_yet_available(job)
+            return
 
         title = ", ".join(
             [md.get("title", job.url[i]) for i, md in enumerate(metadata)]
         )
         self.jobshandler.put((Actions.SET_NAME, (job.id, title)))
+
+        extractor_opts = self.get_extractor_options(metadata[0].get("extractor"))
+        if extractor_opts:
+            ydl_opts = {**extractor_opts, **ydl_opts}
 
         if metadata[0].get("_type") == "playlist" or len(metadata) > 1:
             ydl_opts.update(

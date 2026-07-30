@@ -369,6 +369,65 @@ async def api_metadata_fetch(request):
     return JSONResponse({"success": False}, status_code=404)
 
 
+def summarize_video_info(info):
+    """Distill a single yt-dlp metadata entry into a small, cheap-to-parse
+    summary: just enough to answer "is this still available, and at what
+    quality" without shipping the full formats/thumbnails/subtitles blob
+    that /api/metadata returns.
+    """
+    if info.get("_type") == "playlist":
+        entries = info.get("entries", [])
+        return {
+            "is_playlist": True,
+            "title": info.get("title", ""),
+            "video_count": len(entries),
+        }
+
+    formats = info.get("formats") or []
+    best_format = None
+    if formats:
+        # yt-dlp orders formats worst-to-best; the last entry is the best one.
+        f = formats[-1]
+        best_format = {
+            "format_id": f.get("format_id"),
+            "ext": f.get("ext"),
+            "resolution": f.get("resolution") or f.get("format_note"),
+            "filesize": f.get("filesize") or f.get("filesize_approx"),
+        }
+
+    return {
+        "is_playlist": False,
+        "id": info.get("id"),
+        "title": info.get("title"),
+        "uploader": info.get("uploader"),
+        "duration": info.get("duration"),
+        "is_live": info.get("is_live"),
+        "availability": info.get("availability"),
+        "extractor": info.get("extractor"),
+        "best_format": best_format,
+    }
+
+
+async def api_check_video(request):
+    if request.headers.get("Content-Type") == "application/x-www-form-urlencoded":
+        data = await request.form()
+    else:
+        data = await request.json()
+    url = data.get("url", "").strip()
+    if not url:
+        return JSONResponse({"success": False, "error": "No URL provided"}, status_code=400)
+    force_generic_extractor = data.get("force_generic_extractor", False)
+
+    rc, metadata = request.app.state.ydlhandler.fetch_metadata(
+        [url], force_generic_extractor=force_generic_extractor
+    )
+    if rc != 0:
+        return JSONResponse({"success": False, "error": "Could not fetch video info"}, status_code=404)
+
+    info = metadata[0] if metadata else {}
+    return JSONResponse({"success": True, **summarize_video_info(info)})
+
+
 async def api_playlist_info(request):
     if request.headers.get("Content-Type") == "application/x-www-form-urlencoded":
         data = await request.form()
