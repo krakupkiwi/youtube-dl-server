@@ -1,5 +1,7 @@
 <template>
-    <tr :class="{ 'directory': item.directory }" @click="toggleDirectory" v-if="item.directory" style="cursor: pointer;">
+    <tr :class="{ 'directory': item.directory }" @click="toggleDirectory" @keydown.enter="toggleDirectory"
+      role="button" tabindex="0" :aria-expanded="isOpen"
+      v-if="item.directory" style="cursor: pointer;">
       <td class="col-action file-tree-actions">
         <a type="button">
           <SvgIcon :name="isOpen ? 'folder-open' : 'folder'" color="var(--bs-teal)" size="14" />

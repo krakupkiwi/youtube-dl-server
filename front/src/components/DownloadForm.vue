@@ -177,6 +177,9 @@ export default {
         this.playlistLoading = false;
       }
     },
+    parseUrls() {
+      return this.$refs.urlBox.value.split('\n').map(u => u.trim()).filter(Boolean);
+    },
     async inspectVideo() {
       this.loading = true;
       const url = getAPIUrl('api/metadata', import.meta.env);
@@ -184,7 +187,7 @@ export default {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          urls: this.$refs.urlBox.value.trim().split('\n').join(' ').split(' '),
+          urls: this.parseUrls(),
           force_generic_extractor: this.forceGenericExtractor,
           ...(this.downloadName && { output: this.downloadName })
         })
@@ -240,7 +243,7 @@ export default {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          urls: this.$refs.urlBox.value.trim().split('\n').join(' ').split(' '),
+          urls: this.parseUrls(),
           format: this.$refs.selectedFormat.value,
           aliases: this.selectedAliases,
           force_generic_extractor: this.forceGenericExtractor,

@@ -69,7 +69,13 @@ export default {
     },
     async fetchFinished() {
       const url = getAPIUrl(`api/finished`);
-      this.finished = await (await fetch(url)).json()
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(response.statusText);
+        this.finished = await response.json();
+      } catch (error) {
+        this.showToast(error.message || 'Could not load the finished files list.', false);
+      }
     },
     order(items) {
       return orderBy(items, this.sortBy, this.sortOrder)
@@ -118,16 +124,24 @@ export default {
           <thead>
             <tr>
               <th class="col-action">Action</th>
-              <th class="sortable-header" @click="setSort('name')">Name
+              <th class="sortable-header" role="button" tabindex="0"
+                :aria-sort="sortBy === 'name' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'"
+                @click="setSort('name')" @keydown.enter="setSort('name')" @keydown.space.prevent="setSort('name')">Name
                 <span v-if="sortBy === 'name'" class="sort-chevron" :class="{ flipped: sortOrder === 'asc' }">▾</span>
               </th>
-              <th class="col-size sortable-header" @click="setSort('size')">Size
+              <th class="col-size sortable-header" role="button" tabindex="0"
+                :aria-sort="sortBy === 'size' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'"
+                @click="setSort('size')" @keydown.enter="setSort('size')" @keydown.space.prevent="setSort('size')">Size
                 <span v-if="sortBy === 'size'" class="sort-chevron" :class="{ flipped: sortOrder === 'asc' }">▾</span>
               </th>
-              <th class="col-date sortable-header" @click="setSort('modified')">Modified
+              <th class="col-date sortable-header" role="button" tabindex="0"
+                :aria-sort="sortBy === 'modified' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'"
+                @click="setSort('modified')" @keydown.enter="setSort('modified')" @keydown.space.prevent="setSort('modified')">Modified
                 <span v-if="sortBy === 'modified'" class="sort-chevron" :class="{ flipped: sortOrder === 'asc' }">▾</span>
               </th>
-              <th class="col-date sortable-header" @click="setSort('created')">Downloaded
+              <th class="col-date sortable-header" role="button" tabindex="0"
+                :aria-sort="sortBy === 'created' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'"
+                @click="setSort('created')" @keydown.enter="setSort('created')" @keydown.space.prevent="setSort('created')">Downloaded
                 <span v-if="sortBy === 'created'" class="sort-chevron" :class="{ flipped: sortOrder === 'asc' }">▾</span>
               </th>
             </tr>

@@ -30,9 +30,9 @@ Check items off as they land; each links back to the file(s) involved.
 
 ## Phase 4 — Frontend correctness fixes (small, independent)
 
-- [ ] Fix fragile URL parsing in `DownloadForm.vue`'s `inspectVideo` (`split('\n').join(' ').split(' ')` breaks on blank lines/odd whitespace)
-- [ ] Add try/catch + visible error state around the initial mount-time fetch in `Finished.vue` (currently fails silently)
-- [ ] Add keyboard support/ARIA roles to clickable `<tr>` rows and sortable `<th>` headers (`Logs.vue`, `Finished.vue`)
+- [x] Fix fragile URL parsing in `DownloadForm.vue`'s `inspectVideo` (`split('\n').join(' ').split(' ')` breaks on blank lines/odd whitespace) — replaced with a shared `parseUrls()` helper, also used by `submitVideo` which had the identical bug
+- [x] Add try/catch + visible error state around the initial mount-time fetch in `Finished.vue` (currently fails silently) — also fixed the same bug in `Logs.vue`'s `fetchLogs`, which was worse: a failed request silently killed the 5s auto-refresh polling forever
+- [x] Add keyboard support/ARIA roles to clickable `<tr>` rows and sortable `<th>` headers (`Logs.vue`, `Finished.vue`) — also fixed the directory-toggle row in `FileTreeItem.vue`; verified via a headless browser that `role`, `tabindex`, `aria-sort`/`aria-expanded` all update correctly and keyboard activation works
 
 ## Phase 5 — Frontend features (bigger scope, build on Phase 4)
 

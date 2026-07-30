@@ -102,11 +102,18 @@ export default {
     },
     async fetchLogs(once = false) {
       const url = getAPIUrl(`api/downloads?${this.status ? 'status=' + this.status : ''}`, import.meta.env);
-      this.logs = await (await fetch(url)).json()
-      if (!once && this.mounted) {
-        setTimeout(() => {
-          this.fetchLogs()
-        }, 5000)
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(response.statusText);
+        this.logs = await response.json();
+      } catch (error) {
+        console.error(error);
+      } finally {
+        if (!once && this.mounted) {
+          setTimeout(() => {
+            this.fetchLogs()
+          }, 5000)
+        }
       }
     },
   }
@@ -144,25 +151,33 @@ export default {
           <table class="table table-striped table-hover">
             <thead>
               <tr>
-                <th class="sortable-header col-hide-mobile" @click="toggleSort('last_update')">
+                <th class="sortable-header col-hide-mobile" role="button" tabindex="0"
+                  :aria-sort="sortBy === 'last_update' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'"
+                  @click="toggleSort('last_update')" @keydown.enter="toggleSort('last_update')" @keydown.space.prevent="toggleSort('last_update')">
                   Last update
                   <svg v-if="sortBy === 'last_update'" class="sort-chevron" :class="{ flipped: sortOrder === 'asc' }" xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
                     <path d="M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z"/>
                   </svg>
                 </th>
-                <th class="sortable-header" @click="toggleSort('name')">
+                <th class="sortable-header" role="button" tabindex="0"
+                  :aria-sort="sortBy === 'name' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'"
+                  @click="toggleSort('name')" @keydown.enter="toggleSort('name')" @keydown.space.prevent="toggleSort('name')">
                   Name
                   <svg v-if="sortBy === 'name'" class="sort-chevron" :class="{ flipped: sortOrder === 'asc' }" xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
                     <path d="M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z"/>
                   </svg>
                 </th>
-                <th class="sortable-header" @click="toggleSort('format')">
+                <th class="sortable-header" role="button" tabindex="0"
+                  :aria-sort="sortBy === 'format' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'"
+                  @click="toggleSort('format')" @keydown.enter="toggleSort('format')" @keydown.space.prevent="toggleSort('format')">
                   Format
                   <svg v-if="sortBy === 'format'" class="sort-chevron" :class="{ flipped: sortOrder === 'asc' }" xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
                     <path d="M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z"/>
                   </svg>
                 </th>
-                <th class="sortable-header" @click="toggleSort('status')">
+                <th class="sortable-header" role="button" tabindex="0"
+                  :aria-sort="sortBy === 'status' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'"
+                  @click="toggleSort('status')" @keydown.enter="toggleSort('status')" @keydown.space.prevent="toggleSort('status')">
                   Status
                   <svg v-if="sortBy === 'status'" class="sort-chevron" :class="{ flipped: sortOrder === 'asc' }" xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
                     <path d="M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z"/>
@@ -175,7 +190,9 @@ export default {
               <tr v-if="logs.length === 0">
                 <td :colspan="showLogDetails ? 5 : 4">No {{ status == null ? '' : status.toLowerCase() + ' ' }}jobs found</td>
               </tr>
-              <tr @click="showCurrentLogDetails(log.id)" v-for="log in orderedLogs" :key="log.id" style="cursor: pointer;">
+              <tr @click="showCurrentLogDetails(log.id)" @keydown.enter="showCurrentLogDetails(log.id)"
+                role="button" tabindex="0"
+                v-for="log in orderedLogs" :key="log.id" style="cursor: pointer;">
                 <td class="col-hide-mobile">{{ log.last_update }}</td>
                 <td class="col-name">{{ log.name }}</td>
                 <td><span v-for='fmt in log.format?.split(",")' :class=getFormatBadgeClass(fmt)>{{ fmt }}</span></td>
