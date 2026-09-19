@@ -8,6 +8,7 @@ from queue import Queue, Empty
 from threading import Thread, Lock, Event
 import io
 import importlib
+import importlib.metadata
 import json
 from datetime import datetime
 from subprocess import Popen, PIPE, STDOUT
@@ -22,21 +23,15 @@ YDL_MODULES = ["youtube_dl", "youtube_dlc", "yt_dlp"]
 
 def get_ydl_website(ydl_module_name):
     try:
-        import pip._internal.commands.show as pipshow
-    except ModuleNotFoundError:
-        logger.warning("Module not found, skipping get_ydl_website")
-        return None
-
-    info = list(pipshow.search_packages_info([ydl_module_name]))
-    if len(info) < 1:
+        metadata = importlib.metadata.metadata(ydl_module_name)
+    except importlib.metadata.PackageNotFoundError:
         return ""
-    info = info[0]
-    url = getattr(info, "homepage", None)
+
+    url = metadata.get("Home-page")
     if not url:
-        urls = getattr(info, "project_urls", None)
-        if urls:
-            urls = {v.split(",")[0].strip(): v.split(",")[1].strip() for v in urls if "," in v}
-            url = urls.get("Homepage") or urls.get("Documentation") or urls.get("Repository")
+        urls = {v.split(",")[0].strip(): v.split(",")[1].strip()
+                for v in metadata.get_all("Project-URL", []) if "," in v}
+        url = urls.get("Homepage") or urls.get("Documentation") or urls.get("Repository")
     return url
 
 
