@@ -54,6 +54,77 @@ This is an example service definition that could be put in `docker-compose.yml`.
     restart: always
 ```
 
+### VPN (Private Internet Access)
+
+Some extractors (adult sites in particular) redirect or block requests from
+certain regions/IP ranges, independent of anything yt-dlp itself can work
+around. To route the container's traffic through a VPN, run it alongside a
+[gluetun](https://github.com/qdm12/gluetun) sidecar, which has native PIA
+support - youtube-dl-server joins gluetun's network namespace instead of
+having one of its own, and every request yt-dlp makes goes out through the
+tunnel. This is Docker-only and needs `docker compose` (not plain
+`docker run`), since it requires two containers sharing a network stack.
+
+A full example is in [`docker-compose.pia.yml`](docker-compose.pia.yml).
+The shape of it:
+
+```yml
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    cap_add: [NET_ADMIN]
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    environment:
+      - VPN_SERVICE_PROVIDER=private internet access
+      - VPN_TYPE=wireguard
+      - OPENVPN_USER=${PIA_USER}
+      - OPENVPN_PASSWORD=${PIA_PASS}
+      - WIREGUARD_PRIVATE_KEY= # derived from PIA_USER/PIA_PASS, see gluetun's PIA wiki page
+      - SERVER_REGIONS=US East
+    ports:
+      - 8080:8080 # published on gluetun, not on youtube-dl-server
+
+  youtube-dl-server:
+    image: nbr23/youtube-dl-server:yt-dlp
+    network_mode: "service:gluetun" # shares gluetun's network instead of having its own
+    depends_on: [gluetun]
+    volumes:
+      - $HOME/youtube-dl:/youtube-dl
+      - ./config.yml:/app_config/config.yml
+```
+
+Because `youtube-dl-server` has no network of its own in this setup, its
+`ports:` must move to the `gluetun` service, and it reaches the outside world
+(and gets reached) entirely through gluetun's tunnel. See
+[gluetun's PIA docs](https://github.com/qdm12/gluetun-wiki/blob/main/setup/providers/private-internet-access.md)
+for the WireGuard key derivation step and the full list of `SERVER_REGIONS`
+names. Verify the tunnel is actually up before relying on it:
+
+```shell
+docker compose exec gluetun wget -qO- https://ipinfo.io/ip
+```
+
+That should print a PIA exit IP, not your own. If you're already running
+something like `binhex/arch-delugevpn` for other downloads, note that it
+bundles its own VPN client rather than exposing a shared network namespace,
+so it isn't something youtube-dl-server can attach to directly - the gluetun
+sidecar above gives youtube-dl-server its own independent PIA connection
+instead.
+
+Only yt-dlp's own network traffic needs tunneling for most of these cases -
+if you just want to hand yt-dlp a proxy without rerouting the whole
+container, PIA's SOCKS5 proxy works through the plain [`ydl_options`
+passthrough](#ydl_options), no compose changes needed:
+
+```yaml
+ydl_options:
+  proxy: 'socks5://username:password@proxy-nl.privateinternetaccess.com:1080'
+```
+
+(PIA's proxy username/password are separate from your account login - see
+PIA's own SOCKS5 documentation for how to generate them, and which proxy
+hostnames are currently available.)
+
 ### This fork's image
 
 This fork publishes its own image to GHCR on every push to `master`

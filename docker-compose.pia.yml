@@ -1,0 +1,41 @@
+# Example: youtube-dl-server tunneled through Private Internet Access via gluetun.
+#
+# gluetun (https://github.com/qdm12/gluetun) holds the PIA VPN connection; this
+# container has no network of its own and shares gluetun's instead, so every
+# request yt-dlp makes goes out through PIA. Ports must be published from the
+# gluetun service - youtube-dl-server itself can't publish ports once it's
+# sharing gluetun's network namespace.
+#
+# Usage:
+#   cp docker-compose.pia.yml docker-compose.yml   # or: docker compose -f docker-compose.pia.yml up -d
+#   Fill in PIA_USER / PIA_PASS below (or use an .env file) and run it.
+
+services:
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - VPN_SERVICE_PROVIDER=private internet access
+      - VPN_TYPE=wireguard
+      - OPENVPN_USER=${PIA_USER}
+      - OPENVPN_PASSWORD=${PIA_PASS}
+      - WIREGUARD_PRIVATE_KEY= # see https://github.com/qdm12/gluetun-wiki/blob/main/setup/providers/private-internet-access.md for the one-time script that derives this from PIA_USER/PIA_PASS
+      - SERVER_REGIONS=US East # pick a PIA region name; see gluetun's PIA docs for the full list
+    ports:
+      - 8080:8080 # youtube-dl-server's port, published here instead of on youtube-dl-server itself
+    restart: unless-stopped
+
+  youtube-dl-server:
+    image: nbr23/youtube-dl-server:yt-dlp
+    container_name: youtube-dl-server
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
+    volumes:
+      - ${HOME}/youtube-dl:/youtube-dl
+      - ./config.yml:/app_config/config.yml
+    restart: unless-stopped

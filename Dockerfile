@@ -25,9 +25,17 @@ RUN pip install uv --break-system-packages && \
     uv pip install pip
 
 FROM venv AS venv-yt-dlp
+ARG TARGETPLATFORM
 
+# curl-cffi (impersonation support, needed by extractors like PornHub to avoid
+# bot-detection redirects) has no musllinux wheel for armv7 and no viable
+# source build either, so it's dropped from the yt-dlp extras on that platform.
 RUN source $PYTHON_ENV/bin/activate && \
-  uv pip install -r <(cat ./requirements.txt| grep yt-dlp)
+  if [ "$TARGETPLATFORM" = "linux/arm/v7" ]; then \
+    uv pip install -r <(cat ./requirements.txt| grep yt-dlp | sed 's/,curl-cffi//'); \
+  else \
+    uv pip install -r <(cat ./requirements.txt| grep yt-dlp); \
+  fi
 
 FROM venv AS venv-youtube-dl
 
