@@ -7,6 +7,7 @@ from ydl_server.config import (
     get_ydl_formats,
     get_ui_aliases,
     resolve_finished_file,
+    set_age_limit,
 )
 from ydl_server.db import JobsDB, Job, Actions, JobType
 import asyncio
@@ -179,6 +180,44 @@ async def api_list_formats(request):
             ),
         }
     )
+
+
+async def api_get_settings(request):
+    return JSONResponse({"age_limit": app_config["ydl_options"].get("age-limit")})
+
+
+async def api_update_settings(request):
+    data = await request.json()
+    if "age_limit" not in data:
+        return JSONResponse(
+            {"success": False, "message": "'age_limit' is required"}, status_code=400
+        )
+
+    age_limit = data.get("age_limit")
+    if age_limit is not None:
+        try:
+            age_limit = int(age_limit)
+        except (TypeError, ValueError):
+            return JSONResponse(
+                {"success": False, "message": "age_limit must be a whole number or null"},
+                status_code=400,
+            )
+        if age_limit < 0:
+            return JSONResponse(
+                {"success": False, "message": "age_limit must not be negative"},
+                status_code=400,
+            )
+
+    try:
+        set_age_limit(age_limit)
+    except OSError as e:
+        logger.error("Error saving config - %s", e)
+        return JSONResponse(
+            {"success": False, "message": "Could not save the config file"}, status_code=500
+        )
+
+    request.app.state.ydlhandler.refresh_extractors()
+    return JSONResponse({"success": True, "age_limit": age_limit})
 
 
 async def api_queue_size(request):

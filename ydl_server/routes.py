@@ -13,6 +13,13 @@ finished_files = StaticFiles(directory=get_finished_path())
 routes = [
     Route("/api/extractors", views.api_list_extractors, name="api_list_extractors"),
     Route("/api/formats", views.api_list_formats, name="api_list_formats"),
+    Route("/api/settings", views.api_get_settings, name="api_get_settings", methods=["GET"]),
+    Route(
+        "/api/settings",
+        views.api_update_settings,
+        name="api_update_settings",
+        methods=["PUT"],
+    ),
     Route("/api/info", views.api_server_info, name="api_server_info"),
     Route("/api/downloads/stats", views.api_queue_size, name="api_queue_size"),
     Route("/api/downloads", views.api_logs, name="api_logs"),

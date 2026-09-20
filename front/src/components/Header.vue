@@ -58,6 +58,9 @@ export default {
             <li class="nav-item">
               <router-link to="/finished" class="nav-link">Finished</router-link>
             </li>
+            <li class="nav-item">
+              <router-link to="/settings" class="nav-link">Settings</router-link>
+            </li>
           </ul>
           <div class="stats-bar d-flex align-items-center gap-2 flex-wrap">
             <router-link to="/logs?status=PENDING">

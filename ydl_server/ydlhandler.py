@@ -99,9 +99,17 @@ class YdlHandler:
         importlib.reload(ydl_module.extractor)
 
         self.ydl_version = ydl_module.version.__version__
+        self.ydl_module = ydl_module
+        self.refresh_extractors()
+
+    def refresh_extractors(self):
+        """Recompute the age-limit-filtered extractor list without reimporting
+        the whole module - lets a live age-limit change (see api_update_settings)
+        take effect immediately.
+        """
         self.ydl_extractors = [
             ie.IE_NAME
-            for ie in ydl_module.extractor.list_extractors(
+            for ie in self.ydl_module.extractor.list_extractors(
                 self.app_config["ydl_options"].get("age-limit")
             )
             if ie._WORKING

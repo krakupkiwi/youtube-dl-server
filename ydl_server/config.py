@@ -143,6 +143,48 @@ def load_config():
     return config
 
 
+AGE_LIMIT_LINE_RE = re.compile(r"^[ \t]*age-limit[ \t]*:.*\n?", re.MULTILINE)
+YDL_OPTIONS_HEADER_RE = re.compile(r"^ydl_options[ \t]*:.*$", re.MULTILINE)
+
+
+def set_age_limit(age_limit):
+    """Persist ydl_options.age-limit to the config file on disk, editing the
+    text in place so the rest of the file's comments/formatting survive
+    (a full yaml.safe_dump round-trip would strip them), then update the
+    live app_config dict so the change applies without a server restart.
+    """
+    config_file_path = get_config_file_path()
+    with open(config_file_path, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    existing = AGE_LIMIT_LINE_RE.search(text)
+    if age_limit is None:
+        text = AGE_LIMIT_LINE_RE.sub("", text, count=1)
+    else:
+        if existing:
+            indent = re.match(r"[ \t]*", existing.group(0)).group(0)
+        else:
+            indent_match = re.search(
+                r"^ydl_options[ \t]*:.*\n([ \t]+)\S", text, re.MULTILINE
+            )
+            indent = indent_match.group(1) if indent_match else "  "
+        new_line = "{}age-limit: {}\n".format(indent, age_limit)
+        if existing:
+            text = AGE_LIMIT_LINE_RE.sub(lambda m: new_line, text, count=1)
+        else:
+            text = YDL_OPTIONS_HEADER_RE.sub(
+                lambda m: m.group(0) + "\n" + new_line.rstrip("\n"), text, count=1
+            )
+
+    with open(config_file_path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+    if age_limit is None:
+        app_config["ydl_options"].pop("age-limit", None)
+    else:
+        app_config["ydl_options"]["age-limit"] = age_limit
+
+
 def get_static_prefix(output_template):
     prefix = []
     for s in re.split(r"[\\/]", output_template):

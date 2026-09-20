@@ -9,6 +9,7 @@ import './assets/style.css';
 import Logs from './components/Logs.vue';
 import Home from './components/Home.vue';
 import Finished from './components/Finished.vue';
+import Settings from './components/Settings.vue';
 import { saveConfig, getApiKey } from './utils';
 
 // Optional API-key protection (see ydl_server.middleware.APIKeyMiddleware):
@@ -38,6 +39,7 @@ const routes = [
 	{ path: '/home', component: Home },
 	{ path: '/logs', component: Logs },
 	{ path: '/finished', component: Finished },
+	{ path: '/settings', component: Settings },
 ];
 
 const router = createRouter({
