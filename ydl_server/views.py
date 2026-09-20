@@ -289,6 +289,58 @@ async def api_update_settings(request):
     )
 
 
+async def api_browse_dirs(request):
+    """List subdirectories of `path` (defaults to the filesystem root) so the
+    Settings page can offer a folder picker for download_folders' `path`
+    field, instead of the admin having to remember/type container paths by
+    hand. In a container this only ever sees what's actually mounted in -
+    it's exactly as scoped as the container's own filesystem view, nothing
+    on the host beyond that.
+    """
+    path = request.query_params.get("path") or os.path.abspath(os.sep)
+    if not os.path.isabs(path):
+        return JSONResponse({"success": False, "message": "Path must be absolute"}, status_code=400)
+
+    normalized = os.path.normpath(path)
+    if not os.path.isdir(normalized):
+        return JSONResponse(
+            {"success": False, "message": "Not a directory: {}".format(normalized)}, status_code=400
+        )
+
+    dirs = []
+    try:
+        with os.scandir(normalized) as it:
+            for entry in it:
+                if entry.name.startswith("."):
+                    continue
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        dirs.append(entry.name)
+                except OSError:
+                    continue
+    except OSError as e:
+        return JSONResponse(
+            {"success": False, "message": "Could not list {}: {}".format(normalized, e.strerror or e)},
+            status_code=400,
+        )
+
+    # os.path.dirname is idempotent at the filesystem/drive root (e.g.
+    # dirname("/") == "/", dirname("C:\\") == "C:\\"), which is exactly the
+    # "no parent" signal we want.
+    parent = os.path.dirname(normalized)
+    if parent == normalized:
+        parent = None
+
+    return JSONResponse(
+        {
+            "success": True,
+            "path": normalized,
+            "parent": parent,
+            "dirs": sorted(dirs, key=str.lower),
+        }
+    )
+
+
 async def api_queue_size(request):
     db = JobsDB(readonly=True)
     counts = db.get_job_counts()

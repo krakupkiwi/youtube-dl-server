@@ -20,6 +20,12 @@ routes = [
         name="api_update_settings",
         methods=["PUT"],
     ),
+    Route(
+        "/api/browse-dirs",
+        views.api_browse_dirs,
+        name="api_browse_dirs",
+        methods=["GET"],
+    ),
     Route("/api/info", views.api_server_info, name="api_server_info"),
     Route("/api/downloads/stats", views.api_queue_size, name="api_queue_size"),
     Route("/api/downloads", views.api_logs, name="api_logs"),

@@ -402,12 +402,20 @@ download_folders:
 ```
 
 Picking "Concerts" downloads directly to `/concerts/%(title)s [%(id)s].%(ext)s`,
-not underneath the default output directory at all. `path` must be absolute,
-contain no `..` segments, and isn't validated against what's actually mounted
-in the container - make sure it matches a real volume mount, or the download
-will fail. Note that files sent to a folder with an explicit `path` currently
+not underneath the default output directory at all. `path` must be absolute
+and contain no `..` segments; it isn't cross-checked against `ydl_options`,
+so make sure it's a real, currently-mounted directory or the download will
+fail. Note that files sent to a folder with an explicit `path` currently
 don't show up in the **Finished Files** page (which only browses the default
 output directory) - only the download destination is affected.
+
+Rather than typing (and mistyping) container paths from memory, the Settings
+page's "Browse…" button lets you navigate the server's real filesystem and
+pick an existing directory - backed by `GET /api/browse-dirs`, which lists
+subdirectories of a given path (defaulting to the filesystem root). In a
+container this only ever sees what's actually mounted in, nothing on the
+host beyond that; it sits behind the same access control as every other
+`/api/` route (see [API key protection](#api-key-protection)).
 
 This list - and the [age restriction](#adult-content-filtering) above - can
 also be managed from the in-app **Settings** page (`#/settings`) instead of

@@ -1,6 +1,7 @@
 <script setup>
 import { getAPIUrl } from '../utils'
 import SvgIcon from './SvgIcon.vue'
+import DirectoryBrowserModal from './DirectoryBrowserModal.vue'
 </script>
 <script>
 export default {
@@ -88,6 +89,12 @@ export default {
     removeFolder(index) {
       this.downloadFolders.splice(index, 1);
     },
+    openBrowser() {
+      this.$refs.dirBrowser.open(this.newFolderPath);
+    },
+    onFolderPathSelected(path) {
+      this.newFolderPath = path;
+    },
     showToast(message, success = true) {
       const id = Date.now() + Math.random();
       this.toasts.push({ id, message, success });
@@ -161,6 +168,7 @@ export default {
               <input type="text" class="form-control" style="max-width: 16rem;"
                 placeholder="Container path (optional, e.g. /concerts)" v-model="newFolderPath"
                 @keydown.enter.prevent="addFolder" aria-label="Container path (optional)">
+              <button type="button" class="btn btn-outline-secondary" @click="openBrowser">Browse&hellip;</button>
               <button type="button" class="btn btn-outline-secondary" @click="addFolder">Add</button>
             </div>
           </div>
@@ -172,6 +180,7 @@ export default {
           </div>
         </form>
       </div>
+      <DirectoryBrowserModal ref="dirBrowser" @select="onFolderPathSelected" />
     </div>
   </div>
 </template>
