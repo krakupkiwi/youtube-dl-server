@@ -38,7 +38,7 @@ export default {
       const paths = this.selectedPaths;
       this.selectedPaths = [];
       const results = await Promise.allSettled(paths.map(path =>
-        fetch(getAPIUrl(`api/finished/${encodeURIComponent(path)}`), { method: 'DELETE' })
+        fetch(getAPIUrl(`api/finished/${encodeURIComponent(path)}`, import.meta.env), { method: 'DELETE' })
           .then(r => r.json())
       ));
       const failed = results.filter(r => r.status === 'rejected' || !r.value?.success).length;
@@ -64,7 +64,7 @@ export default {
       new Modal(modalEl).show();
     },
     async confirmDelete() {
-      const url = getAPIUrl(`api/finished/${encodeURIComponent(this.pendingDeleteFile)}`);
+      const url = getAPIUrl(`api/finished/${encodeURIComponent(this.pendingDeleteFile)}`, import.meta.env);
       this.pendingDeleteFile = null;
       try {
         const response = await fetch(url, {
@@ -92,7 +92,7 @@ export default {
       }, 5000);
     },
     async fetchFinished() {
-      const url = getAPIUrl(`api/finished`);
+      const url = getAPIUrl(`api/finished`, import.meta.env);
       try {
         const response = await fetch(url);
         if (!response.ok) throw new Error(response.statusText);

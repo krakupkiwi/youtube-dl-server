@@ -4,7 +4,12 @@ import pytest
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
-from ydl_server.config import get_finished_path, get_static_prefix, resolve_finished_file
+from ydl_server.config import (
+    get_finished_path,
+    get_static_prefix,
+    insert_output_subfolder,
+    resolve_finished_file,
+)
 from ydl_server.routes import routes
 
 
@@ -26,6 +31,59 @@ def test_get_static_prefix_no_static_prefix_returns_empty_string():
 
 def test_get_static_prefix_root_only_template_returns_root():
     assert get_static_prefix("/%(title)s.mp4") == "/"
+
+
+# --- insert_output_subfolder ----------------------------------------------
+
+def test_insert_output_subfolder_no_folder_is_a_noop():
+    template = "/data/foo/%(title)s.mp4"
+    assert insert_output_subfolder(template, None) == template
+    assert insert_output_subfolder(template, "") == template
+
+
+def test_insert_output_subfolder_absolute_prefix():
+    assert (
+        insert_output_subfolder("/data/foo/%(title)s.mp4", "Movies")
+        == "/data/foo/Movies/%(title)s.mp4"
+    )
+
+
+def test_insert_output_subfolder_root_only_prefix():
+    assert (
+        insert_output_subfolder("/%(title)s.mp4", "Movies") == "/Movies/%(title)s.mp4"
+    )
+
+
+def test_insert_output_subfolder_no_static_prefix():
+    assert (
+        insert_output_subfolder("%(title)s [%(id)s].%(ext)s", "Movies")
+        == "Movies/%(title)s [%(id)s].%(ext)s"
+    )
+
+
+def test_insert_output_subfolder_relative_prefix():
+    assert (
+        insert_output_subfolder("youtube-dl/%(title)s.mp4", "Movies")
+        == "youtube-dl/Movies/%(title)s.mp4"
+    )
+
+
+def test_insert_output_subfolder_playlist_template():
+    template = "/data/%(playlist_title)s [%(playlist_id)s]/%(title)s.%(ext)s"
+    assert (
+        insert_output_subfolder(template, "Movies")
+        == "/data/Movies/%(playlist_title)s [%(playlist_id)s]/%(title)s.%(ext)s"
+    )
+
+
+def test_insert_output_subfolder_after_title_override():
+    # Mirrors what YdlHandler.download() produces for a user-supplied title
+    # override before folder insertion runs: a literal filename with no
+    # further "%" markers except the extension placeholder.
+    template = "/data/foo/My Video.%(ext)s"
+    assert (
+        insert_output_subfolder(template, "Movies") == "/data/foo/Movies/My Video.%(ext)s"
+    )
 
 
 # --- resolve_finished_file ------------------------------------------------

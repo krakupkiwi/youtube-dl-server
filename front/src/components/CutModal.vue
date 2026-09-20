@@ -33,7 +33,7 @@ export default {
       return AUDIO_EXTS.includes(this.fileName.split('.').pop().toLowerCase());
     },
     mediaUrl() {
-      return this.filePath ? getAPIUrl(`api/finished/${encodeURIComponent(this.filePath)}`) : '';
+      return this.filePath ? getAPIUrl(`api/finished/${encodeURIComponent(this.filePath)}`, import.meta.env) : '';
     },
   },
   methods: {
@@ -126,7 +126,7 @@ export default {
       }
       this.submitting = true;
       try {
-        const url = getAPIUrl(`api/finished/${encodeURIComponent(this.filePath)}/cut`);
+        const url = getAPIUrl(`api/finished/${encodeURIComponent(this.filePath)}/cut`, import.meta.env);
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

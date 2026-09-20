@@ -7,6 +7,8 @@ export default {
   data: () => ({
     ageRestrictionEnabled: false,
     ageLimit: 18,
+    downloadFolders: [],
+    newFolderName: '',
     loading: true,
     saving: false,
     toasts: [],
@@ -28,6 +30,7 @@ export default {
         } else {
           this.ageRestrictionEnabled = false;
         }
+        this.downloadFolders = data.download_folders || [];
       } catch (error) {
         this.showToast(error.message || 'Could not load settings.', false);
       } finally {
@@ -42,12 +45,13 @@ export default {
         const response = await fetch(url, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ age_limit }),
+          body: JSON.stringify({ age_limit, download_folders: this.downloadFolders }),
         });
         const result = await response.json();
         if (!result.success) {
           this.showToast(result.message || 'Could not save settings.', false);
         } else {
+          this.downloadFolders = result.download_folders || [];
           this.showToast('Settings saved.', true);
         }
       } catch (error) {
@@ -55,6 +59,23 @@ export default {
       } finally {
         this.saving = false;
       }
+    },
+    addFolder() {
+      const name = this.newFolderName.trim();
+      if (!name) return;
+      if (/[/\\,]/.test(name) || name === '.' || name === '..') {
+        this.showToast("Folder names can't contain '/', '\\', or ',', and can't be '.' or '..'.", false);
+        return;
+      }
+      if (this.downloadFolders.includes(name)) {
+        this.showToast('That folder is already in the list.', false);
+        return;
+      }
+      this.downloadFolders.push(name);
+      this.newFolderName = '';
+    },
+    removeFolder(index) {
+      this.downloadFolders.splice(index, 1);
     },
     showToast(message, success = true) {
       const id = Date.now() + Math.random();
@@ -97,6 +118,30 @@ export default {
               <label for="ageLimit" class="form-label">Maximum age rating</label>
               <input type="number" class="form-control" id="ageLimit" min="0" step="1"
                 v-model="ageLimit" style="max-width: 10rem;">
+            </div>
+          </div>
+
+          <div class="p-3 border rounded settings-section mt-3">
+            <h5 class="d-flex align-items-center gap-2"><SvgIcon name="folder" size="18" /> Download folders</h5>
+            <p class="text-muted small mb-3">
+              Named subfolders you can pick as the destination when queueing a download, so
+              it's already sorted where it belongs instead of needing to be moved afterward.
+            </p>
+            <ul v-if="downloadFolders.length" class="list-group mb-3">
+              <li v-for="(folder, index) in downloadFolders" :key="folder"
+                class="list-group-item d-flex justify-content-between align-items-center">
+                {{ folder }}
+                <button type="button" class="btn btn-sm btn-outline-danger" @click="removeFolder(index)"
+                  :aria-label="`Remove ${folder}`">
+                  <SvgIcon name="trash" size="14" />
+                </button>
+              </li>
+            </ul>
+            <p v-else class="text-muted small mb-3">No folders configured yet - downloads go to the default output path.</p>
+            <div class="input-group">
+              <input type="text" class="form-control" placeholder="e.g. Movies" v-model="newFolderName"
+                @keydown.enter.prevent="addFolder" aria-label="New folder name">
+              <button type="button" class="btn btn-outline-secondary" @click="addFolder">Add</button>
             </div>
           </div>
 

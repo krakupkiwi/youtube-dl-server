@@ -226,6 +226,21 @@ the API directly (scripts, curl) needs the same header or query parameter:
 curl -H 'X-API-Key: some-long-random-string' http://{{host}}:8080/api/info
 ```
 
+### Adult content filtering
+
+`ydl_options.age-limit` filters both the extractor list (`/api/extractors`) and
+actual downloads down to content rated at or below the given age:
+
+```yaml
+ydl_options:
+  age-limit: 18
+```
+
+Leave it unset for no restriction. This is easiest to manage from the in-app
+**Settings** page (`#/settings`) rather than editing `config.yml` directly -
+it edits the file in place (comments and formatting elsewhere survive) and
+applies immediately, no restart required.
+
 ### ydl_options
 
 Additional yt-dlp/youtube-dl parameters can be set in the `ydl_options` section. Add
@@ -352,6 +367,32 @@ in this order, the last one winning: `ydl_options`, then the profile (its aliase
 listed order, then its own `ydl_options`), then the aliases selected in the form.
 Unknown aliases and recursive `use:` chains are rejected when the configuration is
 loaded, at server startup.
+
+### Download folders
+
+Named subfolders selectable as the download destination from the download form
+(and the Quick Download modal), so a video can be sorted into place at queue time
+instead of being moved by hand afterward:
+
+```yaml
+download_folders:
+  - Movies
+  - TV Shows
+  - Music
+  - Kids
+```
+
+Picking one nests the file under whatever `output` (global, or a profile's
+override) would otherwise have used - e.g. with the default `output` above,
+choosing "Movies" downloads to `/youtube-dl/Movies/%(title)s [%(id)s].%(ext)s`.
+It composes with profiles, playlists, and title overrides: whichever output
+template ends up selected, the chosen folder is nested into it as the last
+step. Folder names can't contain `/`, `\`, or `,`.
+
+This list - and the [age restriction](#adult-content-filtering) above - can
+also be managed from the in-app **Settings** page (`#/settings`) instead of
+editing `config.yml` by hand; changes there take effect immediately, no
+restart required.
 
 ### Per-extractor options
 

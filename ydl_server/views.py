@@ -8,6 +8,8 @@ from ydl_server.config import (
     get_ui_aliases,
     resolve_finished_file,
     set_age_limit,
+    set_download_folders,
+    is_valid_download_folder_name,
 )
 from ydl_server.db import JobsDB, Job, Actions, JobType
 import asyncio
@@ -178,23 +180,30 @@ async def api_list_formats(request):
             "ydl_default_format": app_config["ydl_server"].get(
                 "default_format", "video/best"
             ),
+            "ydl_download_folders": app_config.get("download_folders", []),
         }
     )
 
 
 async def api_get_settings(request):
-    return JSONResponse({"age_limit": app_config["ydl_options"].get("age-limit")})
+    return JSONResponse(
+        {
+            "age_limit": app_config["ydl_options"].get("age-limit"),
+            "download_folders": app_config.get("download_folders", []),
+        }
+    )
 
 
 async def api_update_settings(request):
     data = await request.json()
-    if "age_limit" not in data:
+    if "age_limit" not in data and "download_folders" not in data:
         return JSONResponse(
-            {"success": False, "message": "'age_limit' is required"}, status_code=400
+            {"success": False, "message": "'age_limit' or 'download_folders' is required"},
+            status_code=400,
         )
 
     age_limit = data.get("age_limit")
-    if age_limit is not None:
+    if "age_limit" in data and age_limit is not None:
         try:
             age_limit = int(age_limit)
         except (TypeError, ValueError):
@@ -208,8 +217,34 @@ async def api_update_settings(request):
                 status_code=400,
             )
 
+    download_folders = data.get("download_folders")
+    if "download_folders" in data:
+        if not isinstance(download_folders, list) or not all(
+            isinstance(f, str) for f in download_folders
+        ):
+            return JSONResponse(
+                {"success": False, "message": "download_folders must be a list of strings"},
+                status_code=400,
+            )
+        download_folders = [f.strip() for f in download_folders]
+        if not all(is_valid_download_folder_name(f) for f in download_folders):
+            return JSONResponse(
+                {
+                    "success": False,
+                    "message": "Folder names must not be empty, '.', '..', or contain '/', '\\', or ','",
+                },
+                status_code=400,
+            )
+        if len(set(download_folders)) != len(download_folders):
+            return JSONResponse(
+                {"success": False, "message": "Folder names must be unique"}, status_code=400
+            )
+
     try:
-        set_age_limit(age_limit)
+        if "age_limit" in data:
+            set_age_limit(age_limit)
+        if "download_folders" in data:
+            set_download_folders(download_folders)
     except OSError as e:
         logger.error("Error saving config - %s", e)
         return JSONResponse(
@@ -217,7 +252,13 @@ async def api_update_settings(request):
         )
 
     request.app.state.ydlhandler.refresh_extractors()
-    return JSONResponse({"success": True, "age_limit": age_limit})
+    return JSONResponse(
+        {
+            "success": True,
+            "age_limit": app_config["ydl_options"].get("age-limit"),
+            "download_folders": app_config.get("download_folders", []),
+        }
+    )
 
 
 async def api_queue_size(request):
@@ -360,6 +401,7 @@ async def api_queue_download(request):
     audio_format = data.get("audio_format")
     format_str = data.get("format")
     force_generic_extractor = data.get("force_generic_extractor", False)
+    folder = data.get("folder")
 
     if isinstance(aliases, str):
         aliases = [a for a in aliases.split(",") if a]
@@ -370,6 +412,8 @@ async def api_queue_download(request):
         format_str = ','.join([format_str] + ["alias/{}".format(a) for a in aliases])
     if audio_format:
         format_str = ',audio/'.join([format_str, audio_format])
+    if folder:
+        format_str = ','.join([format_str, "folder/{}".format(folder)])
     options = {"format": format_str, "force_generic_extractor": force_generic_extractor}
 
     if url:

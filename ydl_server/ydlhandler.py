@@ -13,7 +13,7 @@ import json
 from datetime import datetime
 from subprocess import Popen, PIPE, STDOUT
 
-from ydl_server.config import resolve_finished_file
+from ydl_server.config import resolve_finished_file, insert_output_subfolder
 from ydl_server.db import JobsDB, Job, Actions, JobType
 
 logger = logging.getLogger(__name__)
@@ -200,7 +200,7 @@ class YdlHandler:
             self.jobshandler.put((Actions.UPDATE, job))
 
     def get_format_and_profile(self, format_string):
-        fmt, audio, profile, aliases = None, None, None, []
+        fmt, audio, profile, aliases, folder = None, None, None, [], None
         for s in format_string.split(","):
             if s.startswith("profile/"):
                 profile = s
@@ -208,9 +208,11 @@ class YdlHandler:
                 aliases.append(s)
             elif s.startswith("audio/") or s.startswith("bestaudio/"):
                 audio = s
+            elif s.startswith("folder/"):
+                folder = s
             else:
                 fmt = s
-        return fmt, audio, profile, aliases
+        return fmt, audio, profile, aliases, folder
 
     def get_profile(self, profile_str):
         if not profile_str:
@@ -230,6 +232,14 @@ class YdlHandler:
                 raise Exception("Unknown alias ", alias_str)
             options.update(alias)
         return options
+
+    def get_folder(self, folder_str):
+        if not folder_str:
+            return None
+        folder_name = "/".join(folder_str.split("/")[1:])
+        if folder_name not in (self.app_config.get("download_folders") or []):
+            raise Exception("Unknown download folder ", folder_str)
+        return folder_name
 
     def get_extractor_options(self, extractor_name):
         """Look up per-extractor default ydl_options (config's extractor_options section).
@@ -261,10 +271,13 @@ class YdlHandler:
 
     def get_ydl_options(self, ydl_config, request_options):
         ydl_config = ydl_config.copy()
-        req_format, req_audio, req_profile, req_aliases = self.get_format_and_profile(request_options.get("format"))
+        req_format, req_audio, req_profile, req_aliases, req_folder = self.get_format_and_profile(
+            request_options.get("format")
+        )
 
         profile = self.get_profile(req_profile)
         aliases = self.get_aliases(req_aliases)
+        folder = self.get_folder(req_folder)
         if profile:
             req_format = profile.get("format") if req_format is None else req_format
         if aliases:
@@ -296,7 +309,7 @@ class YdlHandler:
         if aliases:
             aliases = {k: v for k, v in aliases.items() if k != "format"}
             ydl_config.update(aliases)
-        return ydl_config
+        return ydl_config, folder
 
     def download_log_update(self, job, proc, strio, stop_event):
         while not stop_event.is_set():
@@ -335,7 +348,7 @@ class YdlHandler:
         return cmd
 
     def download(self, job, request_options, output):
-        ydl_opts = self.get_ydl_options(
+        ydl_opts, folder = self.get_ydl_options(
             self.app_config.get("ydl_options", {}), request_options
         )
         extra_opts = []
@@ -386,6 +399,9 @@ class YdlHandler:
                     "output": output_template,
                 }
             )
+
+        if folder and ydl_opts.get("output"):
+            ydl_opts["output"] = insert_output_subfolder(ydl_opts["output"], folder)
 
         cmd = self.get_ydl_full_cmd(ydl_opts, job.url, extra_opts)
 

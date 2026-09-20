@@ -30,6 +30,8 @@ export default {
     forceGenericExtractor: false,
     aliases: {},
     selectedAliases: [],
+    downloadFolders: [],
+    selectedFolder: '',
     downloadName: '',
     showAdvancedOptions: false,
     toasts: [],
@@ -52,8 +54,9 @@ export default {
     } catch {
       this.selectedAliases = [];
     }
+    this.selectedFolder = getConfig('defaultFolder', '');
     this.showAdvancedOptions = getConfig('showAdvancedOptions', 'false') === 'true';
-    if (this.showAdvancedOptions || this.forceGenericExtractor || this.selectedAliases.length) {
+    if (this.showAdvancedOptions || this.forceGenericExtractor || this.selectedAliases.length || this.selectedFolder) {
       this.$nextTick(() => this.advancedCollapse.show());
     }
     if (this.autofocus) {
@@ -148,6 +151,10 @@ export default {
       this.formats = await (await fetch(url)).json();
       this.aliases = this.formats.ydl_aliases || {};
       this.selectedAliases = this.selectedAliases.filter(alias => alias in this.aliases);
+      this.downloadFolders = this.formats.ydl_download_folders || [];
+      if (this.selectedFolder && !this.downloadFolders.includes(this.selectedFolder)) {
+        this.selectedFolder = '';
+      }
       this.loadUrlParams();
       if (!this.default_format) {
         this.default_format = getConfig('defaultFormat', null) || this.formats.ydl_default_format;
@@ -217,7 +224,7 @@ export default {
       fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: [videoUrl], aliases: this.selectedAliases, ...params })
+        body: JSON.stringify({ urls: [videoUrl], aliases: this.selectedAliases, folder: this.selectedFolder, ...params })
       })
         .then(response => {
           if (response.status == 200) return response.json();
@@ -239,6 +246,7 @@ export default {
       saveConfig('defaultFormat', this.$refs.selectedFormat.value);
       saveConfig('defaultAliases', JSON.stringify(this.selectedAliases));
       saveConfig('defaultForceGenericExtractor', this.forceGenericExtractor.toString());
+      saveConfig('defaultFolder', this.selectedFolder);
       fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -246,6 +254,7 @@ export default {
           urls: this.parseUrls(),
           format: this.$refs.selectedFormat.value,
           aliases: this.selectedAliases,
+          folder: this.selectedFolder,
           force_generic_extractor: this.forceGenericExtractor,
           extra_params: extra_params,
         })
@@ -375,6 +384,13 @@ export default {
                 :value="alias" v-model="selectedAliases">
               <label class="form-check-label" :for="'alias-' + alias + '-' + uid">{{ alias_name }}</label>
             </div>
+          </div>
+          <div class="advanced-options-section" v-if="downloadFolders.length">
+            <label :for="'selectedFolder-' + uid" class="advanced-options-section-label mb-0">Destination folder</label>
+            <select class="custom-select form-control" :id="'selectedFolder-' + uid" v-model="selectedFolder">
+              <option value="">Default</option>
+              <option v-for="folder in downloadFolders" :key="folder" :value="folder">{{ folder }}</option>
+            </select>
           </div>
           <div class="advanced-options-section">
             <label :for="'downloadName-' + uid" class="advanced-options-section-label mb-0">Override video title</label>

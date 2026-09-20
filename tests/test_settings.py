@@ -1,7 +1,7 @@
 import pytest
 
 from ydl_server import config as config_module
-from ydl_server.config import set_age_limit
+from ydl_server.config import is_valid_download_folder_name, set_age_limit, set_download_folders
 
 SAMPLE_CONFIG = """\
 ydl_server:   # youtube-dl-server specific settings
@@ -22,6 +22,23 @@ ydl_options:
   ignore-errors: True
 """
 
+SAMPLE_CONFIG_WITH_DOWNLOAD_FOLDERS = """\
+ydl_server:
+  port: 8080
+
+ydl_options:
+  output: '/x/%(title)s.%(ext)s'
+  ignore-errors: True
+
+download_folders:  # subfolders selectable as a download destination
+  - Movies
+  - TV Shows
+
+aliases:
+  mp3:
+      name: 'MP3 audio'
+"""
+
 
 @pytest.fixture
 def isolated_config(tmp_path, monkeypatch):
@@ -30,11 +47,16 @@ def isolated_config(tmp_path, monkeypatch):
     monkeypatch.setenv("YDL_CONFIG_PATH", str(config_file))
 
     original_age_limit = config_module.app_config["ydl_options"].get("age-limit")
+    original_download_folders = config_module.app_config.get("download_folders")
     yield config_file
     if original_age_limit is None:
         config_module.app_config["ydl_options"].pop("age-limit", None)
     else:
         config_module.app_config["ydl_options"]["age-limit"] = original_age_limit
+    if original_download_folders is None:
+        config_module.app_config.pop("download_folders", None)
+    else:
+        config_module.app_config["download_folders"] = original_download_folders
 
 
 def test_set_age_limit_inserts_new_line_preserving_comments(isolated_config):
@@ -75,3 +97,63 @@ def test_set_age_limit_none_when_absent_is_a_noop(isolated_config):
     text = isolated_config.read_text()
     assert text == SAMPLE_CONFIG
     assert "age-limit" not in config_module.app_config["ydl_options"]
+
+
+# --- is_valid_download_folder_name -----------------------------------------
+
+@pytest.mark.parametrize("name", ["Movies", "TV Shows", "Kids_2024", "Misc (temp)"])
+def test_is_valid_download_folder_name_accepts_plain_names(name):
+    assert is_valid_download_folder_name(name) is True
+
+
+@pytest.mark.parametrize(
+    "name", ["", ".", "..", "Movies/Action", "Movies\\Action", "a,b", "\x00"]
+)
+def test_is_valid_download_folder_name_rejects_unsafe_names(name):
+    assert is_valid_download_folder_name(name) is False
+
+
+# --- set_download_folders ---------------------------------------------------
+
+def test_set_download_folders_inserts_new_block(isolated_config):
+    set_download_folders(["Movies", "TV Shows"])
+
+    text = isolated_config.read_text()
+    assert "download_folders:" in text
+    assert "  - Movies" in text
+    assert "  - TV Shows" in text
+    assert "# output template" in text
+    assert config_module.app_config["download_folders"] == ["Movies", "TV Shows"]
+
+
+def test_set_download_folders_replaces_existing_block_preserving_rest(isolated_config):
+    isolated_config.write_text(SAMPLE_CONFIG_WITH_DOWNLOAD_FOLDERS)
+
+    set_download_folders(["Music"])
+
+    text = isolated_config.read_text()
+    assert "  - Music" in text
+    assert "Movies" not in text
+    assert "TV Shows" not in text
+    assert "aliases:" in text
+    assert "mp3:" in text
+    assert config_module.app_config["download_folders"] == ["Music"]
+
+
+def test_set_download_folders_empty_list_removes_block(isolated_config):
+    isolated_config.write_text(SAMPLE_CONFIG_WITH_DOWNLOAD_FOLDERS)
+
+    set_download_folders([])
+
+    text = isolated_config.read_text()
+    assert "download_folders" not in text
+    assert "aliases:" in text
+    assert config_module.app_config["download_folders"] == []
+
+
+def test_set_download_folders_empty_when_absent_is_a_noop(isolated_config):
+    set_download_folders([])
+
+    text = isolated_config.read_text()
+    assert text == SAMPLE_CONFIG
+    assert config_module.app_config["download_folders"] == []

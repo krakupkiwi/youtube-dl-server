@@ -185,6 +185,50 @@ def set_age_limit(age_limit):
         app_config["ydl_options"]["age-limit"] = age_limit
 
 
+DOWNLOAD_FOLDER_NAME_RE = re.compile(r"^[^/\\,\x00]+$")
+DOWNLOAD_FOLDERS_BLOCK_RE = re.compile(
+    r"^download_folders:[^\n]*\n(?:[ \t]+[^\n]*\n|[ \t]*\n)*", re.MULTILINE
+)
+
+
+def is_valid_download_folder_name(name):
+    """A folder name is used as a single literal path segment (see
+    insert_output_subfolder), so it must not contain a path separator, a
+    comma (the format-string token separator - see YdlHandler.get_folder),
+    or a null byte.
+    """
+    return bool(name) and bool(DOWNLOAD_FOLDER_NAME_RE.match(name)) and name not in (".", "..")
+
+
+def set_download_folders(folders):
+    """Persist the top-level `download_folders` list to the config file on
+    disk, replacing just that block of text (any comments/formatting
+    elsewhere in the file survive), then update the live app_config dict so
+    the change applies without a server restart.
+    """
+    config_file_path = get_config_file_path()
+    with open(config_file_path, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    if folders:
+        lines = "".join("  - {}\n".format(name) for name in folders)
+        block = "download_folders:  # subfolders selectable as a download destination\n{}".format(lines)
+    else:
+        block = ""
+
+    if DOWNLOAD_FOLDERS_BLOCK_RE.search(text):
+        text = DOWNLOAD_FOLDERS_BLOCK_RE.sub(lambda m: block, text, count=1)
+    elif block:
+        if text and not text.endswith("\n"):
+            text += "\n"
+        text += "\n" + block
+
+    with open(config_file_path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+    app_config["download_folders"] = list(folders)
+
+
 def get_static_prefix(output_template):
     prefix = []
     for s in re.split(r"[\\/]", output_template):
@@ -194,6 +238,26 @@ def get_static_prefix(output_template):
     if prefix == [""]:
         return "/"
     return "/".join(prefix)
+
+
+def insert_output_subfolder(output_template, folder):
+    """Insert `folder` as a path segment right after the static (non-%)
+    prefix of an output template, so a per-download folder choice nests
+    under wherever the current output template (global, or already swapped
+    out by a profile/playlist/title override) already points.
+    """
+    if not folder:
+        return output_template
+    prefix = get_static_prefix(output_template)
+    if prefix == "/":
+        base, rest = "/", output_template[1:]
+    else:
+        base, rest = prefix, output_template[len(prefix):]
+    if not rest.startswith(("/", "\\")):
+        rest = "/" + rest
+    if base and base != "/":
+        base = base + "/"
+    return base + folder + rest
 
 
 def get_paths_home():
