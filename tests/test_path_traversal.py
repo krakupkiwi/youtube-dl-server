@@ -5,10 +5,12 @@ from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
 from ydl_server.config import (
+    apply_download_folder,
     get_finished_path,
     get_static_prefix,
     insert_output_subfolder,
     resolve_finished_file,
+    set_output_root,
 )
 from ydl_server.routes import routes
 
@@ -83,6 +85,70 @@ def test_insert_output_subfolder_after_title_override():
     template = "/data/foo/My Video.%(ext)s"
     assert (
         insert_output_subfolder(template, "Movies") == "/data/foo/Movies/My Video.%(ext)s"
+    )
+
+
+# --- set_output_root -------------------------------------------------------
+
+def test_set_output_root_replaces_absolute_prefix():
+    assert (
+        set_output_root("/data/foo/%(title)s.mp4", "/concerts")
+        == "/concerts/%(title)s.mp4"
+    )
+
+
+def test_set_output_root_replaces_root_only_prefix():
+    assert set_output_root("/%(title)s.mp4", "/concerts") == "/concerts/%(title)s.mp4"
+
+
+def test_set_output_root_no_static_prefix():
+    assert (
+        set_output_root("%(title)s [%(id)s].%(ext)s", "/concerts")
+        == "/concerts/%(title)s [%(id)s].%(ext)s"
+    )
+
+
+def test_set_output_root_windows_new_root():
+    assert (
+        set_output_root("/data/foo/%(title)s.mp4", "C:\\Users\\foo\\Concerts")
+        == "C:\\Users\\foo\\Concerts/%(title)s.mp4"
+    )
+
+
+def test_set_output_root_strips_trailing_slash_on_new_root():
+    assert (
+        set_output_root("/data/%(title)s.mp4", "/concerts/") == "/concerts/%(title)s.mp4"
+    )
+
+
+def test_set_output_root_playlist_template():
+    template = "/data/%(playlist_title)s [%(playlist_id)s]/%(title)s.%(ext)s"
+    assert (
+        set_output_root(template, "/concerts")
+        == "/concerts/%(playlist_title)s [%(playlist_id)s]/%(title)s.%(ext)s"
+    )
+
+
+# --- apply_download_folder --------------------------------------------------
+
+def test_apply_download_folder_none_is_a_noop():
+    template = "/data/foo/%(title)s.mp4"
+    assert apply_download_folder(template, None) == template
+
+
+def test_apply_download_folder_bare_name_nests_as_subfolder():
+    assert (
+        apply_download_folder("/data/foo/%(title)s.mp4", {"name": "Movies", "path": None})
+        == "/data/foo/Movies/%(title)s.mp4"
+    )
+
+
+def test_apply_download_folder_with_path_replaces_root():
+    assert (
+        apply_download_folder(
+            "/data/foo/%(title)s.mp4", {"name": "Concerts", "path": "/concerts"}
+        )
+        == "/concerts/%(title)s.mp4"
     )
 
 

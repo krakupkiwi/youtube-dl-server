@@ -10,6 +10,7 @@ from ydl_server.config import (
     set_age_limit,
     set_download_folders,
     is_valid_download_folder_name,
+    is_valid_download_folder_path,
 )
 from ydl_server.db import JobsDB, Job, Actions, JobType
 import asyncio
@@ -180,7 +181,9 @@ async def api_list_formats(request):
             "ydl_default_format": app_config["ydl_server"].get(
                 "default_format", "video/best"
             ),
-            "ydl_download_folders": app_config.get("download_folders", []),
+            "ydl_download_folders": [
+                f["name"] for f in app_config.get("download_folders", [])
+            ],
         }
     )
 
@@ -219,15 +222,27 @@ async def api_update_settings(request):
 
     download_folders = data.get("download_folders")
     if "download_folders" in data:
-        if not isinstance(download_folders, list) or not all(
-            isinstance(f, str) for f in download_folders
-        ):
+        if not isinstance(download_folders, list):
             return JSONResponse(
-                {"success": False, "message": "download_folders must be a list of strings"},
-                status_code=400,
+                {"success": False, "message": "download_folders must be a list"}, status_code=400
             )
-        download_folders = [f.strip() for f in download_folders]
-        if not all(is_valid_download_folder_name(f) for f in download_folders):
+        normalized = []
+        for f in download_folders:
+            if isinstance(f, str):
+                normalized.append({"name": f.strip(), "path": None})
+            elif isinstance(f, dict):
+                name = (f.get("name") or "").strip()
+                path = (f.get("path") or "").strip() or None
+                normalized.append({"name": name, "path": path})
+            else:
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "message": "Each download folder must be a name, or a {name, path} object",
+                    },
+                    status_code=400,
+                )
+        if not all(is_valid_download_folder_name(f["name"]) for f in normalized):
             return JSONResponse(
                 {
                     "success": False,
@@ -235,10 +250,23 @@ async def api_update_settings(request):
                 },
                 status_code=400,
             )
-        if len(set(download_folders)) != len(download_folders):
+        if not all(
+            f["path"] is None or is_valid_download_folder_path(f["path"]) for f in normalized
+        ):
+            return JSONResponse(
+                {
+                    "success": False,
+                    "message": "Folder paths must be absolute (e.g. /concerts), contain no "
+                    "'..' segments, and not be '/'",
+                },
+                status_code=400,
+            )
+        names = [f["name"] for f in normalized]
+        if len(set(names)) != len(names):
             return JSONResponse(
                 {"success": False, "message": "Folder names must be unique"}, status_code=400
             )
+        download_folders = normalized
 
     try:
         if "age_limit" in data:

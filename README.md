@@ -389,6 +389,26 @@ It composes with profiles, playlists, and title overrides: whichever output
 template ends up selected, the chosen folder is nested into it as the last
 step. Folder names can't contain `/`, `\`, or `,`.
 
+An entry can also give itself its own absolute path instead of nesting under
+the default output - useful on Unraid/Docker setups where each media type is
+bind-mounted to its own separate container path rather than everything
+living under one shared directory:
+
+```yaml
+download_folders:
+  - Movies                # nests under the default output, as above
+  - name: Concerts
+    path: /concerts        # a separately mounted path - downloads go straight there
+```
+
+Picking "Concerts" downloads directly to `/concerts/%(title)s [%(id)s].%(ext)s`,
+not underneath the default output directory at all. `path` must be absolute,
+contain no `..` segments, and isn't validated against what's actually mounted
+in the container - make sure it matches a real volume mount, or the download
+will fail. Note that files sent to a folder with an explicit `path` currently
+don't show up in the **Finished Files** page (which only browses the default
+output directory) - only the download destination is affected.
+
 This list - and the [age restriction](#adult-content-filtering) above - can
 also be managed from the in-app **Settings** page (`#/settings`) instead of
 editing `config.yml` by hand; changes there take effect immediately, no
@@ -476,6 +496,29 @@ aliases:
       extract-audio: True
       audio-format: flac
 ```
+
+**Plex-friendly layout** - the built-in `plex` alias in the default config puts
+each video in its own folder named after the video (Plex's expected layout for
+local movies), and writes the thumbnail as a same-named `.jpg` next to it,
+which Plex picks up automatically as poster art (needs ffmpeg, already bundled
+in this project's Docker image):
+
+```yaml
+aliases:
+  plex:
+    name: 'Plex (movie folder + poster)'
+    ydl_options:
+      output: '/youtube-dl/%(title)s [%(id)s]/%(title)s [%(id)s].%(ext)s'
+      write-thumbnail: True
+      convert-thumbnails: jpg
+```
+
+Match the `/youtube-dl/` prefix to your own `ydl_options.output` base path if
+you've changed it - like the `podcast` profile above, this fully replaces
+`output` rather than appending to it. It composes with
+[download folders](#download-folders): picking both `plex` and, say, a
+"Movies" folder nests as `Movies/Title [id]/Title [id].mp4` +
+`Movies/Title [id]/Title [id].jpg`.
 
 ## Python
 

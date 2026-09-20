@@ -13,7 +13,7 @@ import json
 from datetime import datetime
 from subprocess import Popen, PIPE, STDOUT
 
-from ydl_server.config import resolve_finished_file, insert_output_subfolder
+from ydl_server.config import resolve_finished_file, apply_download_folder
 from ydl_server.db import JobsDB, Job, Actions, JobType
 
 logger = logging.getLogger(__name__)
@@ -237,9 +237,10 @@ class YdlHandler:
         if not folder_str:
             return None
         folder_name = "/".join(folder_str.split("/")[1:])
-        if folder_name not in (self.app_config.get("download_folders") or []):
-            raise Exception("Unknown download folder ", folder_str)
-        return folder_name
+        for entry in self.app_config.get("download_folders") or []:
+            if entry.get("name") == folder_name:
+                return entry
+        raise Exception("Unknown download folder ", folder_str)
 
     def get_extractor_options(self, extractor_name):
         """Look up per-extractor default ydl_options (config's extractor_options section).
@@ -401,7 +402,7 @@ class YdlHandler:
             )
 
         if folder and ydl_opts.get("output"):
-            ydl_opts["output"] = insert_output_subfolder(ydl_opts["output"], folder)
+            ydl_opts["output"] = apply_download_folder(ydl_opts["output"], folder)
 
         cmd = self.get_ydl_full_cmd(ydl_opts, job.url, extra_opts)
 

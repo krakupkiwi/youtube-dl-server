@@ -28,6 +28,12 @@ aliases:  # reusable ydl_options sets, usable from profiles and from the downloa
       ydl_options:
         write-thumbnail: True
         embed-thumbnail: True
+  plex:
+      name: 'Plex (movie folder + poster)'
+      ydl_options:
+        output: '/youtube-dl/%(title)s [%(id)s]/%(title)s [%(id)s].%(ext)s'
+        write-thumbnail: True
+        convert-thumbnails: jpg
 
 profiles:
   podcast:

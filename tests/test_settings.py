@@ -1,7 +1,12 @@
 import pytest
 
 from ydl_server import config as config_module
-from ydl_server.config import is_valid_download_folder_name, set_age_limit, set_download_folders
+from ydl_server.config import (
+    is_valid_download_folder_name,
+    is_valid_download_folder_path,
+    set_age_limit,
+    set_download_folders,
+)
 
 SAMPLE_CONFIG = """\
 ydl_server:   # youtube-dl-server specific settings
@@ -113,6 +118,36 @@ def test_is_valid_download_folder_name_rejects_unsafe_names(name):
     assert is_valid_download_folder_name(name) is False
 
 
+# --- is_valid_download_folder_path ------------------------------------------
+
+@pytest.mark.parametrize(
+    "path",
+    ["/concerts", "/mnt/user/Movies", "/a/b/c", "C:\\Users\\foo\\Concerts", "C:/Users/foo/Concerts"],
+)
+def test_is_valid_download_folder_path_accepts_absolute_paths(path):
+    assert is_valid_download_folder_path(path) is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "",
+        "/",
+        "concerts",
+        "relative/path",
+        "/concerts/../etc",
+        "/a/..",
+        "\x00",
+        None,
+        "C:\\",
+        "C:/",
+        "C:\\..\\etc",
+    ],
+)
+def test_is_valid_download_folder_path_rejects_unsafe_paths(path):
+    assert is_valid_download_folder_path(path) is False
+
+
 # --- set_download_folders ---------------------------------------------------
 
 def test_set_download_folders_inserts_new_block(isolated_config):
@@ -120,10 +155,13 @@ def test_set_download_folders_inserts_new_block(isolated_config):
 
     text = isolated_config.read_text()
     assert "download_folders:" in text
-    assert "  - Movies" in text
-    assert "  - TV Shows" in text
+    assert "  - 'Movies'" in text
+    assert "  - 'TV Shows'" in text
     assert "# output template" in text
-    assert config_module.app_config["download_folders"] == ["Movies", "TV Shows"]
+    assert config_module.app_config["download_folders"] == [
+        {"name": "Movies", "path": None},
+        {"name": "TV Shows", "path": None},
+    ]
 
 
 def test_set_download_folders_replaces_existing_block_preserving_rest(isolated_config):
@@ -132,12 +170,12 @@ def test_set_download_folders_replaces_existing_block_preserving_rest(isolated_c
     set_download_folders(["Music"])
 
     text = isolated_config.read_text()
-    assert "  - Music" in text
+    assert "  - 'Music'" in text
     assert "Movies" not in text
     assert "TV Shows" not in text
     assert "aliases:" in text
     assert "mp3:" in text
-    assert config_module.app_config["download_folders"] == ["Music"]
+    assert config_module.app_config["download_folders"] == [{"name": "Music", "path": None}]
 
 
 def test_set_download_folders_empty_list_removes_block(isolated_config):
@@ -157,3 +195,45 @@ def test_set_download_folders_empty_when_absent_is_a_noop(isolated_config):
     text = isolated_config.read_text()
     assert text == SAMPLE_CONFIG
     assert config_module.app_config["download_folders"] == []
+
+
+def test_set_download_folders_with_explicit_path(isolated_config):
+    set_download_folders([{"name": "Concerts", "path": "/concerts"}])
+
+    text = isolated_config.read_text()
+    assert "  - name: 'Concerts'" in text
+    assert "    path: '/concerts'" in text
+    assert config_module.app_config["download_folders"] == [
+        {"name": "Concerts", "path": "/concerts"}
+    ]
+
+
+def test_set_download_folders_mixed_entries_round_trip(isolated_config):
+    set_download_folders(["Movies", {"name": "Concerts", "path": "/concerts"}])
+
+    text = isolated_config.read_text()
+    assert "  - 'Movies'" in text
+    assert "  - name: 'Concerts'" in text
+    assert "    path: '/concerts'" in text
+
+    # Re-reading the file the way load_config() would should normalize both
+    # shapes identically to what we just wrote.
+    import yaml
+    from ydl_server.config import normalize_download_folders
+
+    reloaded = yaml.safe_load(text)
+    normalize_download_folders(reloaded)
+    assert reloaded["download_folders"] == [
+        {"name": "Movies", "path": None},
+        {"name": "Concerts", "path": "/concerts"},
+    ]
+
+
+def test_set_download_folders_quotes_embedded_special_characters(isolated_config):
+    set_download_folders(["It's Movies"])
+
+    text = isolated_config.read_text()
+    assert "  - 'It''s Movies'" in text
+    assert config_module.app_config["download_folders"] == [
+        {"name": "It's Movies", "path": None}
+    ]

@@ -102,6 +102,25 @@ def resolve_aliases(config):
         profile.pop("use", None)
 
 
+def normalize_download_folder(entry):
+    """A download_folders entry is either a bare name (a subfolder nested
+    under wherever the active output template already points - e.g. for
+    Unraid/Docker users who bind-mount everything under one path), or a
+    {name, path} mapping giving it its own absolute container path (e.g. a
+    separately bind-mounted share like /concerts). Normalize either shape to
+    {"name": str, "path": str|None}.
+    """
+    if isinstance(entry, str):
+        return {"name": entry, "path": None}
+    return {"name": entry.get("name"), "path": entry.get("path") or None}
+
+
+def normalize_download_folders(config):
+    folders = config.get("download_folders")
+    if folders:
+        config["download_folders"] = [normalize_download_folder(f) for f in folders]
+
+
 def copy_default_config(config_file_path):
     try:
         shutil.copy("./default_config.yml", config_file_path)
@@ -139,6 +158,7 @@ def load_config():
 
     if config is not None:
         resolve_aliases(config)
+        normalize_download_folders(config)
 
     return config
 
@@ -192,12 +212,45 @@ DOWNLOAD_FOLDERS_BLOCK_RE = re.compile(
 
 
 def is_valid_download_folder_name(name):
-    """A folder name is used as a single literal path segment (see
-    insert_output_subfolder), so it must not contain a path separator, a
-    comma (the format-string token separator - see YdlHandler.get_folder),
-    or a null byte.
+    """A folder name is used as a single literal path segment when it has no
+    explicit `path` (see insert_output_subfolder), so it must not contain a
+    path separator, a comma (the format-string token separator - see
+    YdlHandler.get_folder), or a null byte.
     """
     return bool(name) and bool(DOWNLOAD_FOLDER_NAME_RE.match(name)) and name not in (".", "..")
+
+
+WINDOWS_DRIVE_ABS_RE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def is_valid_download_folder_path(path):
+    """An explicit destination path (see set_output_root) replaces the whole
+    output root, so - unlike a bare folder name - it must be an absolute
+    path, not just a single literal segment: POSIX ('/concerts') or Windows
+    ('C:\\concerts', since the server can also run natively on Windows - see
+    get_static_prefix), with no '..' segments, no null bytes, and not just
+    the filesystem/drive root itself.
+    """
+    if not path or "\x00" in path:
+        return False
+    is_posix_abs = path.startswith("/") and path != "/"
+    is_windows_abs = bool(WINDOWS_DRIVE_ABS_RE.match(path)) and len(path) > 3
+    if not (is_posix_abs or is_windows_abs):
+        return False
+    return ".." not in re.split(r"[\\/]", path)
+
+
+def _yaml_single_quote(value):
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _download_folder_yaml_lines(folder):
+    name, path = folder["name"], folder.get("path")
+    if path:
+        return "  - name: {}\n    path: {}\n".format(
+            _yaml_single_quote(name), _yaml_single_quote(path)
+        )
+    return "  - {}\n".format(_yaml_single_quote(name))
 
 
 def set_download_folders(folders):
@@ -205,13 +258,19 @@ def set_download_folders(folders):
     disk, replacing just that block of text (any comments/formatting
     elsewhere in the file survive), then update the live app_config dict so
     the change applies without a server restart.
+
+    Each entry is either a bare name (nested as a subfolder under wherever
+    the active output template already points) or a {"name", "path"} mapping
+    giving it its own absolute container path - see apply_download_folder.
     """
+    folders = [normalize_download_folder(f) for f in folders]
+
     config_file_path = get_config_file_path()
     with open(config_file_path, "r", encoding="utf-8") as f:
         text = f.read()
 
     if folders:
-        lines = "".join("  - {}\n".format(name) for name in folders)
+        lines = "".join(_download_folder_yaml_lines(f) for f in folders)
         block = "download_folders:  # subfolders selectable as a download destination\n{}".format(lines)
     else:
         block = ""
@@ -226,7 +285,7 @@ def set_download_folders(folders):
     with open(config_file_path, "w", encoding="utf-8") as f:
         f.write(text)
 
-    app_config["download_folders"] = list(folders)
+    app_config["download_folders"] = folders
 
 
 def get_static_prefix(output_template):
@@ -258,6 +317,33 @@ def insert_output_subfolder(output_template, folder):
     if base and base != "/":
         base = base + "/"
     return base + folder + rest
+
+
+def set_output_root(output_template, new_root):
+    """Replace the static (non-%) prefix of an output template with an
+    entirely different root, keeping the dynamic (filename/subpath) part -
+    for a download_folders entry with its own explicit `path`, mapped to a
+    separately bind-mounted container path (e.g. Unraid's /concerts) rather
+    than a subfolder of the default output tree.
+    """
+    prefix = get_static_prefix(output_template)
+    rest = output_template[1:] if prefix == "/" else output_template[len(prefix):]
+    if not rest.startswith(("/", "\\")):
+        rest = "/" + rest
+    return new_root.rstrip("/\\") + rest
+
+
+def apply_download_folder(output_template, folder):
+    """Apply a resolved download_folders entry (YdlHandler.get_folder) to an
+    output template: nest it as a subfolder of wherever the template already
+    points, or - if the entry has its own explicit `path` - swap in that path
+    as the new root entirely.
+    """
+    if not folder:
+        return output_template
+    if folder.get("path"):
+        return set_output_root(output_template, folder["path"])
+    return insert_output_subfolder(output_template, folder["name"])
 
 
 def get_paths_home():

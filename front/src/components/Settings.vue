@@ -9,6 +9,7 @@ export default {
     ageLimit: 18,
     downloadFolders: [],
     newFolderName: '',
+    newFolderPath: '',
     loading: true,
     saving: false,
     toasts: [],
@@ -62,17 +63,27 @@ export default {
     },
     addFolder() {
       const name = this.newFolderName.trim();
+      const path = this.newFolderPath.trim();
       if (!name) return;
       if (/[/\\,]/.test(name) || name === '.' || name === '..') {
         this.showToast("Folder names can't contain '/', '\\', or ',', and can't be '.' or '..'.", false);
         return;
       }
-      if (this.downloadFolders.includes(name)) {
+      if (path) {
+        const isPosixAbs = path.startsWith('/') && path !== '/';
+        const isWindowsAbs = /^[A-Za-z]:[\\/]/.test(path) && path.length > 3;
+        if (!(isPosixAbs || isWindowsAbs) || path.split(/[\\/]/).includes('..')) {
+          this.showToast("Container path must be absolute (e.g. /concerts), not the root, and contain no '..' segments.", false);
+          return;
+        }
+      }
+      if (this.downloadFolders.some(f => f.name === name)) {
         this.showToast('That folder is already in the list.', false);
         return;
       }
-      this.downloadFolders.push(name);
+      this.downloadFolders.push({ name, path: path || null });
       this.newFolderName = '';
+      this.newFolderPath = '';
     },
     removeFolder(index) {
       this.downloadFolders.splice(index, 1);
@@ -126,21 +137,30 @@ export default {
             <p class="text-muted small mb-3">
               Named subfolders you can pick as the destination when queueing a download, so
               it's already sorted where it belongs instead of needing to be moved afterward.
+              Leave "Container path" blank to nest under the default output folder, or set it
+              to a separately mounted container path (e.g. Unraid's <code>/concerts</code>) to
+              download straight there instead.
             </p>
             <ul v-if="downloadFolders.length" class="list-group mb-3">
-              <li v-for="(folder, index) in downloadFolders" :key="folder"
+              <li v-for="(folder, index) in downloadFolders" :key="folder.name"
                 class="list-group-item d-flex justify-content-between align-items-center">
-                {{ folder }}
+                <span>
+                  {{ folder.name }}
+                  <span v-if="folder.path" class="text-muted small">&rarr; {{ folder.path }}</span>
+                </span>
                 <button type="button" class="btn btn-sm btn-outline-danger" @click="removeFolder(index)"
-                  :aria-label="`Remove ${folder}`">
+                  :aria-label="`Remove ${folder.name}`">
                   <SvgIcon name="trash" size="14" />
                 </button>
               </li>
             </ul>
             <p v-else class="text-muted small mb-3">No folders configured yet - downloads go to the default output path.</p>
-            <div class="input-group">
-              <input type="text" class="form-control" placeholder="e.g. Movies" v-model="newFolderName"
-                @keydown.enter.prevent="addFolder" aria-label="New folder name">
+            <div class="d-flex flex-wrap gap-2">
+              <input type="text" class="form-control" style="max-width: 12rem;" placeholder="e.g. Movies"
+                v-model="newFolderName" @keydown.enter.prevent="addFolder" aria-label="New folder name">
+              <input type="text" class="form-control" style="max-width: 16rem;"
+                placeholder="Container path (optional, e.g. /concerts)" v-model="newFolderPath"
+                @keydown.enter.prevent="addFolder" aria-label="Container path (optional)">
               <button type="button" class="btn btn-outline-secondary" @click="addFolder">Add</button>
             </div>
           </div>
