@@ -24,6 +24,16 @@ RUN pip install uv --break-system-packages && \
     uv pip install -r <(cat ./requirements.txt| grep -v youtube-dl | grep -v yt-dlp) && \
     uv pip install pip
 
+FROM venv AS test
+
+WORKDIR /usr/src/app
+ENV PATH="${PYTHON_ENV}/bin:$PATH"
+
+COPY ./ydl_server ./ydl_server
+COPY ./tests ./tests
+
+CMD ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]
+
 FROM venv AS venv-yt-dlp
 ARG TARGETPLATFORM
 
@@ -46,10 +56,8 @@ RUN source $PYTHON_ENV/bin/activate && \
 FROM python:alpine AS base
 ENV PYTHON_ENV="/usr/local/python-env"
 ARG ATOMICPARSLEY=0
-ARG YDLS_VERSION
 ARG YDLS_RELEASE_DATE
 
-ENV YDLS_VERSION=$YDLS_VERSION
 ENV YDLS_RELEASE_DATE=$YDLS_RELEASE_DATE
 
 WORKDIR /usr/src/app

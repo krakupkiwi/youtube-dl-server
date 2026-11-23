@@ -42,7 +42,7 @@ export default {
   <header>
     <nav class="navbar navbar-expand-md navbar-dark">
       <div class="container-fluid">
-        <router-link to="/" class="navbar-brand">{{ prettyModule }}</router-link>
+        <router-link to="/" class="navbar-brand">{{ server_info.site_title || prettyModule }}</router-link>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#collapsingNavbar"
           aria-controls="collapsingNavbar" aria-expanded="false" aria-label="Toggle navigation">
           <span class="navbar-toggler-icon"></span>
@@ -78,6 +78,10 @@ export default {
                 class="badge bg-info stat-badge">
                 <SvgIcon name="arrow-repeat" size="12" /> {{ stats.running }}/{{ server_info.download_workers_count }}
               </span>
+            </router-link>
+            <router-link to="/logs?status=SCHEDULED" v-if="stats.scheduled">
+              <span title="Scheduled" id='scheduled_size'
+                class="badge bg-primary">{{ stats.scheduled }}</span>
             </router-link>
             <router-link to="/logs?status=COMPLETED">
               <span title="Completed" id='completed_size'

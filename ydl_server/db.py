@@ -1,8 +1,8 @@
-import logging
-import sqlite3
-import re
 import datetime
 import json
+import logging
+import re
+import sqlite3
 from functools import wraps
 
 from ydl_server.config import app_config
@@ -20,14 +20,15 @@ def _sqlite_uri(path, readonly=False):
     path = path.replace("\\", "/")
     if len(path) > 1 and path[1] == ":":
         path = "/" + path
-    uri = "file://{}".format(path)
+    uri = f"file://{path}"
     if readonly:
         uri += "?mode=ro"
     return uri
 
-STATUS_NAME = ["Running", "Completed", "Failed", "Pending", "Aborted"]
+STATUS_NAME = ["Running", "Completed", "Failed", "Pending", "Aborted", "Scheduled"]
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
+
 
 class Actions:
     DOWNLOAD = 1
@@ -42,6 +43,7 @@ class Actions:
     SET_PID = 10
     DELETE_LOG = 11
     DELETE_LOG_SAFE = 12
+    ABORT = 13
 
 
 class JobType:
@@ -56,8 +58,9 @@ class Job:
     FAILED = 2
     PENDING = 3
     ABORTED = 4
+    SCHEDULED = 5
 
-    def __init__(self, name, status, log, jobtype, format=None, url=None, id=-1, pid=0, force_generic_extractor=False, extra_params=None):
+    def __init__(self, name, status, log, jobtype, format=None, url=None, id=-1, pid=0, force_generic_extractor=False, extra_params=None, scheduled_at=None):
         self.id = id
         self.name = name
         self.status = status
@@ -69,6 +72,7 @@ class Job:
         self.pid = pid
         self.force_generic_extractor = force_generic_extractor
         self.extra_params = extra_params if extra_params is not None else {}
+        self.scheduled_at = scheduled_at
 
     @staticmethod
     def clean_logs(logs):
@@ -78,7 +82,7 @@ class Job:
         for line in logs.split("\n"):
             line = re.sub(".*\r", "", line)
             if len(line) > 0:
-                clean = "%s%s\n" % (clean, line)
+                clean = f"{clean}{line}\n"
         return clean
 
 
@@ -90,6 +94,9 @@ def with_cursor(f):
             result = f(self, cursor, *args, **kwargs)
             self.conn.commit()
             return result
+        except Exception:
+            self.conn.rollback()
+            raise
         finally:
             cursor.close()
     return wrapper
@@ -122,17 +129,18 @@ class JobsDB:
 
     # Base columns that have existed since the very first schema; if any of
     # these are missing the table isn't just outdated, it's incompatible.
-    BASE_COLUMNS = {
+    BASE_COLUMNS = frozenset({
         "id", "name", "status", "format", "log", "last_update", "type", "url", "pid",
-    }
+    })
 
     # (column, DDL) pairs for columns added by later schema versions, applied
     # in order to whichever of them are missing regardless of the DB's
     # recorded version - the actual columns present are the source of truth.
-    COLUMN_MIGRATIONS = [
+    COLUMN_MIGRATIONS = (
         ("force_generic_extractor", "ALTER TABLE jobs ADD COLUMN force_generic_extractor INTEGER DEFAULT 0;"),
         ("extra_params", "ALTER TABLE jobs ADD COLUMN extra_params TEXT DEFAULT '{}';"),
-    ]
+        ("scheduled_at", "ALTER TABLE jobs ADD COLUMN scheduled_at INTEGER;"),
+    )
 
     @staticmethod
     def migrate(conn, version):
@@ -186,7 +194,8 @@ class JobsDB:
                         url TEXT,
                         pid INTEGER,
                         force_generic_extractor INTEGER DEFAULT 0,
-                        extra_params TEXT DEFAULT '{}'
+                        extra_params TEXT DEFAULT '{}',
+                        scheduled_at INTEGER
                     );
                 """
             )
@@ -200,7 +209,7 @@ class JobsDB:
 
     @staticmethod
     def convert_datetime_to_tz(dt):
-        dt = datetime.datetime.strptime("{} +0000".format(dt), "%Y-%m-%d %H:%M:%S %z")
+        dt = datetime.datetime.strptime(f"{dt} +0000", "%Y-%m-%d %H:%M:%S %z")
         return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
     def __init__(self, readonly=True):
@@ -217,9 +226,9 @@ class JobsDB:
         cursor.execute(
             """
             INSERT INTO jobs
-                (name, status, log, format, type, url, pid, force_generic_extractor, extra_params)
+                (name, status, log, format, type, url, pid, force_generic_extractor, extra_params, scheduled_at)
             VALUES
-                (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
                 job.name,
@@ -231,6 +240,7 @@ class JobsDB:
                 job.pid,
                 int(getattr(job, "force_generic_extractor", False)),
                 json.dumps(getattr(job, "extra_params", {})),
+                getattr(job, "scheduled_at", None),
             ),
         )
         job.id = cursor.lastrowid
@@ -240,11 +250,22 @@ class JobsDB:
         cursor.execute(
             """
             UPDATE jobs
-            SET status = ?, log = ?, last_update = datetime(), force_generic_extractor = ?, extra_params = ? \
-            WHERE id = ?;
+            SET status = ?, log = ?, last_update = datetime(), force_generic_extractor = ?, extra_params = ?, scheduled_at = ? \
+            WHERE id = ? AND (status != ? OR ? = ?);
             """,
-            (job.status, job.log, int(getattr(job, "force_generic_extractor", False)), json.dumps(getattr(job, "extra_params", {})), job.id),
+            (
+                job.status,
+                job.log,
+                int(getattr(job, "force_generic_extractor", False)),
+                json.dumps(getattr(job, "extra_params", {})),
+                getattr(job, "scheduled_at", None),
+                job.id,
+                Job.ABORTED,
+                job.status,
+                Job.ABORTED,
+            ),
         )
+        return cursor.rowcount
 
     @with_cursor
     def set_job_status(self, cursor, job_id, status):
@@ -252,10 +273,22 @@ class JobsDB:
             """
             UPDATE jobs
             SET status = ?, last_update = datetime() \
-            WHERE id = ?;
+            WHERE id = ? AND (status != ? OR ? = ?);
             """,
-            (status, job_id),
+            (status, job_id, Job.ABORTED, status, Job.ABORTED),
         )
+
+    @with_cursor
+    def abort_job(self, cursor, job_id):
+        cursor.execute(
+            """
+            UPDATE jobs
+            SET status = ?, pid = 0, scheduled_at = NULL, last_update = datetime()
+            WHERE id = ? AND status IN (?, ?, ?);
+            """,
+            (Job.ABORTED, job_id, Job.PENDING, Job.RUNNING, Job.SCHEDULED),
+        )
+        return bool(cursor.rowcount)
 
     @with_cursor
     def set_job_pid(self, cursor, job_id, pid):
@@ -302,8 +335,8 @@ class JobsDB:
     @with_cursor
     def delete_job_safe(self, cursor, job_id):
         cursor.execute(
-            "DELETE FROM jobs WHERE id = ? AND ( status = ? OR status = ? );",
-            (job_id, Job.ABORTED, Job.FAILED),
+            "DELETE FROM jobs WHERE id = ? AND status IN (?, ?, ?);",
+            (job_id, Job.ABORTED, Job.FAILED, Job.SCHEDULED),
         )
         return cursor.rowcount
 
@@ -322,49 +355,18 @@ class JobsDB:
             DELETE FROM jobs
             WHERE id NOT IN (
                 SELECT id FROM jobs ORDER BY last_update DESC LIMIT ?
-            ) AND status != ? AND status != ?;
+            ) AND status NOT IN (?, ?, ?);
             """,
-            (limit, Job.PENDING, Job.RUNNING),
+            (limit, Job.PENDING, Job.RUNNING, Job.SCHEDULED),
         )
         return cursor.rowcount
-
-    @with_cursor
-    def get_failed_jobs_for_auto_retry(self, cursor):
-        """Failed jobs marked not_yet_available (see YdlHandler.mark_not_yet_available),
-        with a raw (naive UTC, as stored by SQLite) last_update for age comparison -
-        unlike get_jobs_with_logs, which formats last_update for display in the
-        server's local timezone.
-        """
-        cursor.execute(
-            """
-            SELECT id, name, format, url, extra_params, force_generic_extractor, last_update
-            FROM jobs
-            WHERE status = ?;
-            """,
-            (Job.FAILED,),
-        )
-        rows = []
-        for (job_id, name, format, url, extra_params, force_generic_extractor, last_update) in cursor.fetchall():
-            parsed_extra_params = json.loads(extra_params or "{}")
-            if not parsed_extra_params.get("not_yet_available"):
-                continue
-            rows.append({
-                "id": job_id,
-                "name": name,
-                "format": format,
-                "urls": url.split("\n"),
-                "extra_params": parsed_extra_params,
-                "force_generic_extractor": bool(force_generic_extractor),
-                "last_update": last_update,
-            })
-        return rows
 
     @with_cursor
     def get_job_by_id(self, cursor, job_id):
         cursor.execute(
             """
             SELECT
-                id, name, status, log, last_update, format, type, url, pid, force_generic_extractor, extra_params
+                id, name, status, log, last_update, format, type, url, pid, force_generic_extractor, extra_params, scheduled_at
             FROM
                 jobs
             WHERE id = ?;
@@ -386,6 +388,7 @@ class JobsDB:
             pid,
             force_generic_extractor,
             extra_params,
+            scheduled_at,
         ) = row
         return {
             "id": job_id,
@@ -399,6 +402,7 @@ class JobsDB:
             "pid": pid,
             "force_generic_extractor": bool(force_generic_extractor),
             "extra_params": json.loads(extra_params or '{}'),
+            "scheduled_at": scheduled_at,
         }
 
     @with_cursor
@@ -408,7 +412,7 @@ class JobsDB:
             cursor.execute(
                 """
                 SELECT
-                    id, name, status, log, last_update, format, type, url, pid, force_generic_extractor, extra_params
+                    id, name, status, log, last_update, format, type, url, pid, force_generic_extractor, extra_params, scheduled_at
                 FROM
                     jobs
                 WHERE
@@ -421,7 +425,7 @@ class JobsDB:
             cursor.execute(
                 """
                 SELECT
-                    id, name, status, log, last_update, format, type, url, pid, force_generic_extractor, extra_params
+                    id, name, status, log, last_update, format, type, url, pid, force_generic_extractor, extra_params, scheduled_at
                 FROM
                     jobs
                 ORDER BY last_update DESC LIMIT ?;
@@ -441,6 +445,7 @@ class JobsDB:
             pid,
             force_generic_extractor,
             extra_params,
+            scheduled_at,
         ) in cursor.fetchall():
             rows.append(
                 {
@@ -455,6 +460,7 @@ class JobsDB:
                     "pid": pid,
                     "force_generic_extractor": bool(force_generic_extractor),
                     "extra_params": json.loads(extra_params or '{}'),
+                    "scheduled_at": scheduled_at,
                 }
             )
         return rows
@@ -466,7 +472,7 @@ class JobsDB:
             cursor.execute(
                 """
                 SELECT
-                    id, name, status, last_update, format, type, url, pid, force_generic_extractor, extra_params
+                    id, name, status, last_update, format, type, url, pid, force_generic_extractor, extra_params, scheduled_at
                 FROM
                     jobs
                 WHERE
@@ -479,7 +485,7 @@ class JobsDB:
             cursor.execute(
                 """
                 SELECT
-                    id, name, status, last_update, format, type, url, pid, force_generic_extractor, extra_params
+                    id, name, status, last_update, format, type, url, pid, force_generic_extractor, extra_params, scheduled_at
                 FROM
                     jobs
                 ORDER BY last_update DESC LIMIT ?;
@@ -498,6 +504,7 @@ class JobsDB:
             pid,
             force_generic_extractor,
             extra_params,
+            scheduled_at,
         ) in cursor.fetchall():
             rows.append(
                 {
@@ -511,9 +518,71 @@ class JobsDB:
                     "pid": pid,
                     "force_generic_extractor": bool(force_generic_extractor),
                     "extra_params": json.loads(extra_params or '{}'),
+                    "scheduled_at": scheduled_at,
                 }
             )
         return rows
+
+    @with_cursor
+    def get_unfinished_jobs(self, cursor):
+        cursor.execute(
+            """
+            SELECT
+                id, name, format, type, url, force_generic_extractor, extra_params
+            FROM
+                jobs
+            WHERE
+                status IN (?, ?)
+            ORDER BY id;
+            """,
+            (Job.PENDING, Job.RUNNING),
+        )
+        return [
+            {
+                "id": job_id,
+                "name": name,
+                "format": format,
+                "type": jobtype,
+                "urls": url.split("\n"),
+                "force_generic_extractor": bool(force_generic_extractor),
+                "extra_params": json.loads(extra_params or '{}'),
+            }
+            for job_id, name, format, jobtype, url, force_generic_extractor, extra_params in cursor.fetchall()
+        ]
+
+    @with_cursor
+    def get_due_scheduled_jobs(self, cursor, now):
+        cursor.execute(
+            """
+            SELECT
+                id, name, format, type, url, force_generic_extractor, extra_params
+            FROM
+                jobs
+            WHERE
+                status = ? AND scheduled_at <= ?;
+            """,
+            (Job.SCHEDULED, now),
+        )
+        return [
+            {
+                "id": job_id,
+                "name": name,
+                "format": format,
+                "type": jobtype,
+                "urls": url.split("\n"),
+                "force_generic_extractor": bool(force_generic_extractor),
+                "extra_params": json.loads(extra_params or '{}'),
+            }
+            for (
+                job_id,
+                name,
+                format,
+                jobtype,
+                url,
+                force_generic_extractor,
+                extra_params,
+            ) in cursor.fetchall()
+        ]
 
     @with_cursor
     def get_job_counts(self, cursor):

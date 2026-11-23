@@ -1,7 +1,7 @@
 <script setup>
 import { orderBy, capitalize } from 'lodash'
 import { Modal } from 'bootstrap'
-import { getAPIUrl, saveConfig, getConfig, getApiKey } from '../utils';
+import { getAPIUrl, formatCountdown, saveConfig, getConfig, getApiKey } from '../utils';
 </script>
 <script>
 export default {
@@ -14,7 +14,8 @@ export default {
       Failed: 'badge bg-danger',
       Aborted: 'badge bg-warning',
       Running: 'badge bg-info',
-      Completed: 'badge bg-success'
+      Completed: 'badge bg-success',
+      Scheduled: 'badge bg-primary'
     },
     sortBy: 'last_update',
     sortOrder: 'desc',
@@ -22,6 +23,7 @@ export default {
     currentLogDetailId: null,
     status: null,
     selectedIds: [],
+    commandCopied: false,
   }),
   watch: {
     '$route'() {
@@ -38,6 +40,9 @@ export default {
     this.showLogDetails = getConfig('showLogDetails', 'true') === 'true';
     this.status = this.$route.query.status;
     this.connectStream();
+    if (this.$route.query.job) {
+      this.showCurrentLogDetails(Number(this.$route.query.job));
+    }
   },
   unmounted() {
     this.disconnectStream();
@@ -45,6 +50,10 @@ export default {
   computed: {
     getLogById: function () {
       return this.logs.find(log => log.id === this.currentLogDetailId);
+    },
+    currentCommand: function () {
+      const line = this.getLogById?.log?.split('\n').find(l => l.startsWith('[cmd] '));
+      return line?.slice(6);
     },
     orderedLogs: function () {
       if (this.sortBy === 'last_update') {
@@ -101,7 +110,24 @@ export default {
     },
     showCurrentLogDetails(logId) {
       this.currentLogDetailId = logId
+      this.commandCopied = false;
       this.currentLogDetailsModal.show();
+    },
+    copyCommand() {
+      const text = this.currentCommand;
+      if (!text) return;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      this.commandCopied = true;
+      setTimeout(() => { this.commandCopied = false }, 1500);
     },
     abortDownload(job_id) {
       const url = getAPIUrl(`api/jobs/${job_id}/stop`, import.meta.env);
@@ -187,7 +213,7 @@ export default {
           </div>
           <div class="dropdown">
             <a class="btn btn-outline-secondary dropdown-toggle" href="#" role="button" id="statusFilterDropDown" data-bs-toggle="dropdown" aria-expanded="false">
-              Status {{ ['COMPLETED', 'FAILED', 'PENDING', 'RUNNING', 'ABORTED'].includes(status) ? `(${capitalize(status)})` : '(All)' }}
+              Status {{ ['COMPLETED', 'FAILED', 'PENDING', 'RUNNING', 'ABORTED', 'SCHEDULED'].includes(status) ? `(${capitalize(status)})` : '(All)' }}
             </a>
             <ul class="dropdown-menu" aria-labelledby="statusFilterDropDown">
               <li><router-link class="dropdown-item" to="/logs">All</router-link></li>
@@ -196,6 +222,7 @@ export default {
               <li><router-link class="dropdown-item" to="/logs?status=PENDING">Pending</router-link></li>
               <li><router-link class="dropdown-item" to="/logs?status=RUNNING">Running</router-link></li>
               <li><router-link class="dropdown-item" to="/logs?status=ABORTED">Aborted</router-link></li>
+              <li><router-link class="dropdown-item" to="/logs?status=SCHEDULED">Scheduled</router-link></li>
             </ul>
           </div>
         </div>
@@ -259,13 +286,7 @@ export default {
                 <td class="col-hide-mobile">{{ log.last_update }}</td>
                 <td class="col-name">{{ log.name }}</td>
                 <td><span v-for='fmt in log.format?.split(",")' :class=getFormatBadgeClass(fmt)>{{ fmt }}</span></td>
-                <td v-if="log.status == 'Failed' && log.extra_params?.not_yet_available">
-                  <span class="badge bg-secondary status-action" @click.stop="retryDownload(log.id)"
-                    title="yt-dlp reported this video isn't available yet (scheduled/upcoming). It will be retried automatically.">
-                    Not available yet / Retry
-                  </span>
-                </td>
-                <td v-else-if="log.status == 'Failed' || log.status == 'Aborted'">
+                <td v-if="log.status == 'Failed' || log.status == 'Aborted'">
                   <span :class=statusToTrClass[log.status] class="status-action" @click.stop="retryDownload(log.id)">
                     {{ log.status }} / Retry
                   </span>
@@ -273,6 +294,11 @@ export default {
                 <td v-else-if="log.status == 'Running' || log.status == 'Pending'">
                   <span :class=statusToTrClass[log.status] class="status-action" @click.stop="abortDownload(log.id)">
                     {{ log.status }} &times;
+                  </span>
+                </td>
+                <td v-else-if="log.status == 'Scheduled'">
+                  <span :class=statusToTrClass[log.status] class="status-action" @click.stop="abortDownload(log.id)">
+                    {{ log.status }} {{ formatCountdown(log.scheduled_at) }} &times;
                   </span>
                 </td>
                 <td v-else>
@@ -295,6 +321,15 @@ export default {
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
               </div>
               <div class="modal-body" id="currentLogDetailContent">
+                <div v-if="currentCommand" class="mb-3">
+                  <div class="d-flex align-items-center justify-content-between mb-1">
+                    <span class="text-secondary small">Command</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @click="copyCommand">
+                      {{ commandCopied ? 'Copied' : 'Copy' }}
+                    </button>
+                  </div>
+                  <code class="command-output">{{ currentCommand }}</code>
+                </div>
                 <pre v-if="currentLogDetailId" class="log-output">{{ getLogById?.log }}</pre>
                 <div v-else class="spinner-border" role="status">
                   <span class="visually-hidden">Loading...</span>
@@ -307,6 +342,12 @@ export default {
                 </div>
                 <div v-else-if="getLogById?.status == 'Running' || getLogById?.status == 'Pending'">
                   <button class="btn btn-primary" role="button" aria-label="Abort" data-bs-dismiss="modal"
+                    @click="abortDownload(getLogById?.id)">Abort</button>
+                </div>
+                <div v-else-if="getLogById?.status == 'Scheduled'" class="d-flex gap-2">
+                  <button class="btn btn-primary" role="button" aria-label="Download now" data-bs-dismiss="modal"
+                    @click="retryDownload(getLogById?.id)">Download now</button>
+                  <button class="btn btn-outline-primary" role="button" aria-label="Abort" data-bs-dismiss="modal"
                     @click="abortDownload(getLogById?.id)">Abort</button>
                 </div>
                 <button type="button" class="btn btn-danger" data-bs-dismiss="modal" @click="deleteLog(getLogById?.id)">Delete log</button>

@@ -1,123 +1,167 @@
 import logging
 import time
-from datetime import datetime
-from queue import Queue, Empty
-from threading import Thread
-from ydl_server.db import Actions, Job, JobsDB, JobType
+from concurrent.futures import Future
+from queue import Empty, Queue
+from threading import Event, Thread
+
+from ydl_server.db import Actions, Job, JobsDB
 
 logger = logging.getLogger(__name__)
 
-AUTO_RETRY_SWEEP_INTERVAL_SECONDS = 60
-AUTO_RETRY_DELAY_SECONDS = 30 * 60
-AUTO_RETRY_MAX_ATTEMPTS = 20
+
+class JobInsertError(Exception):
+    pass
+
+
+class JobInsertTimeout(TimeoutError):
+    pass
 
 
 class JobsHandler:
     def __init__(self, app_config):
         self.queue = Queue()
         self.thread = None
+        self.scheduler_thread = None
         self.done = False
+        self.scheduler_stop = Event()
         self.app_config = app_config
-        self._last_auto_retry_sweep = 0.0
 
     def start(self, dl_queue):
         self.thread = Thread(target=self.worker, args=(dl_queue,))
         self.thread.start()
+        self.scheduler_thread = Thread(target=self.scheduler_worker)
+        self.scheduler_thread.start()
 
     def stop(self):
-        self.done = True
+        self.finish()
 
     def put(self, obj):
         self.queue.put(obj)
 
+    def insert_and_wait(self, job, timeout=5):
+        return self.submit_and_wait(Actions.INSERT, job, timeout)
+
+    def submit_and_wait(self, action, job, timeout=5):
+        if self.done:
+            raise JobInsertError("Job manager is stopped")
+        future = Future()
+        self.queue.put((action, job, future))
+        try:
+            return future.result(timeout)
+        except TimeoutError as exc:
+            future.cancel()
+            raise JobInsertTimeout("Timed out waiting for the job queue") from exc
+        except Exception as exc:
+            raise JobInsertError("Could not process job action") from exc
+
+    def stop_scheduler(self):
+        self.scheduler_stop.set()
+        if self.scheduler_thread is not None:
+            self.scheduler_thread.join()
+
     def finish(self):
+        self.stop_scheduler()
         self.done = True
 
     def worker(self, dl_queue):
         db = JobsDB(readonly=False)
-        while not self.done:
-            try:
-                action, job = self.queue.get(timeout=1)
-            except Empty:
-                self._maybe_auto_retry_scheduled_jobs(db, dl_queue)
-                continue
-            if action == Actions.PURGE_LOGS:
-                if db.purge_jobs():
-                    db.vacuum()
-            elif action == Actions.INSERT:
-                if db.clean_old_jobs(
-                        self.app_config["ydl_server"].get("max_log_entries", 100) - 1
-                    ):
-                    db.vacuum()
-                db.insert_job(job)
-                dl_queue.put(job)
-            elif action == Actions.UPDATE:
-                db.update_job(job)
-            elif action == Actions.RESUME:
-                db.update_job(job)
-                dl_queue.put(job)
-            elif action == Actions.SET_NAME:
-                job_id, name = job
-                db.set_job_name(job_id, name)
-            elif action == Actions.SET_LOG:
-                job_id, log = job
-                db.set_job_log(job_id, log)
-            elif action == Actions.SET_STATUS:
-                job_id, status = job
-                db.set_job_status(job_id, status)
-            elif action == Actions.SET_PID:
-                job_id, pid = job
-                db.set_job_pid(job_id, pid)
-            elif action == Actions.CLEAN_LOGS:
-                if db.clean_old_jobs():
-                    db.vacuum()
-            elif action == Actions.DELETE_LOG_SAFE:
-                if db.delete_job_safe(job["id"]):
-                    db.vacuum()
-            elif action == Actions.DELETE_LOG:
-                if db.delete_job(job["id"]):
-                    db.vacuum()
-            self.queue.task_done()
+        try:
+            while not self.done or not self.queue.empty():
+                try:
+                    item = self.queue.get(timeout=1)
+                except Empty:
+                    continue
+                action, future, error = None, None, None
+                try:
+                    action, job = item[:2]
+                    future = item[2] if len(item) > 2 else None
+                    if future is not None and not future.set_running_or_notify_cancel():
+                        continue
+                    result = self.handle_action(db, dl_queue, action, job)
+                except Exception as exc:
+                    logger.exception("Error processing job action %s", action)
+                    error = exc
+                finally:
+                    self.queue.task_done()
+                if future is not None:
+                    if error is not None:
+                        future.set_exception(error)
+                    else:
+                        future.set_result(result)
+        finally:
+            db.close()
 
-    def _maybe_auto_retry_scheduled_jobs(self, db, dl_queue):
-        now = time.monotonic()
-        if now - self._last_auto_retry_sweep < AUTO_RETRY_SWEEP_INTERVAL_SECONDS:
-            return
-        self._last_auto_retry_sweep = now
-
-        for job_dict in db.get_failed_jobs_for_auto_retry():
-            try:
-                last_update = datetime.strptime(job_dict["last_update"], "%Y-%m-%d %H:%M:%S")
-            except (TypeError, ValueError):
-                continue
-            age_seconds = (datetime.utcnow() - last_update).total_seconds()
-            if age_seconds < AUTO_RETRY_DELAY_SECONDS:
-                continue
-
-            extra_params = job_dict["extra_params"]
-            retry_count = extra_params.get("auto_retry_count", 0)
-            if retry_count >= AUTO_RETRY_MAX_ATTEMPTS:
-                continue
-
-            new_extra_params = dict(extra_params)
-            new_extra_params.pop("not_yet_available", None)
-            new_extra_params["auto_retry_count"] = retry_count + 1
-
-            new_job = Job(
-                job_dict["name"], Job.PENDING, "", JobType.YDL_DOWNLOAD,
-                job_dict["format"], job_dict["urls"], extra_params=new_extra_params,
-            )
-            new_job.force_generic_extractor = job_dict["force_generic_extractor"]
-
-            db.delete_job_safe(job_dict["id"])
+    def handle_action(self, db, dl_queue, action, job):
+        if action == Actions.PURGE_LOGS:
+            if db.purge_jobs():
+                db.vacuum()
+        elif action == Actions.INSERT:
             if db.clean_old_jobs(self.app_config["ydl_server"].get("max_log_entries", 100) - 1):
                 db.vacuum()
-            db.insert_job(new_job)
-            dl_queue.put(new_job)
-            logger.info(
-                "Auto-retrying scheduled job %s (attempt %d)", job_dict["id"], retry_count + 1
-            )
+            db.insert_job(job)
+            dl_queue.put(job)
+            return job.id
+        elif action == Actions.UPDATE:
+            db.update_job(job)
+        elif action == Actions.RESUME:
+            if db.update_job(job):
+                dl_queue.put(job)
+        elif action == Actions.ABORT:
+            return db.abort_job(job)
+        elif action == Actions.SET_NAME:
+            job_id, name = job
+            db.set_job_name(job_id, name)
+        elif action == Actions.SET_LOG:
+            job_id, log = job
+            db.set_job_log(job_id, log)
+        elif action == Actions.SET_STATUS:
+            job_id, status = job
+            db.set_job_status(job_id, status)
+        elif action == Actions.SET_PID:
+            job_id, pid = job
+            db.set_job_pid(job_id, pid)
+        elif action == Actions.CLEAN_LOGS:
+            if db.clean_old_jobs():
+                db.vacuum()
+        elif action == Actions.DELETE_LOG_SAFE:
+            if db.delete_job_safe(job["id"]):
+                db.vacuum()
+        elif action == Actions.DELETE_LOG:
+            if db.delete_job(job["id"]):
+                db.vacuum()
+        else:
+            raise ValueError(f"Unknown job action: {action}")
+        return None
+
+    def scheduler_worker(self):
+        """Re-queue scheduled jobs (upcoming live events) once their release time is reached."""
+        db = JobsDB(readonly=True)
+        interval = self.app_config["ydl_server"].get("schedule_check_interval", 60)
+        elapsed = interval
+        while not self.scheduler_stop.is_set():
+            if elapsed < interval:
+                self.scheduler_stop.wait(1)
+                elapsed += 1
+                continue
+            elapsed = 0
+            for due in db.get_due_scheduled_jobs(int(time.time())):
+                logger.info("Scheduled time reached for job %s", due["id"])
+                job = Job(
+                    due["name"],
+                    Job.PENDING,
+                    "Scheduled time reached",
+                    int(due["type"]),
+                    due["format"],
+                    due["urls"],
+                    id=due["id"],
+                    force_generic_extractor=due["force_generic_extractor"],
+                    extra_params=due["extra_params"],
+                )
+                self.put((Actions.RESUME, job))
+        db.close()
 
     def join(self):
+        if self.scheduler_thread is not None:
+            self.scheduler_thread.join()
         if self.thread is not None:
             return self.thread.join()

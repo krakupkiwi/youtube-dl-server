@@ -587,6 +587,14 @@ div.input-group > input.form-control::placeholder {
   background-color: var(--t-danger);
 }
 
+.toast-clickable {
+  cursor: pointer;
+}
+
+.toast-clickable:hover {
+  filter: brightness(1.1);
+}
+
 .sort-arrow {
   text-decoration: none;
   color: var(--t-text-muted);
@@ -682,6 +690,22 @@ div.input-group > input.form-control::placeholder {
   white-space: pre-wrap;
   word-wrap: break-word;
   margin: 0;
+}
+
+.command-output {
+  display: block;
+  background-color: var(--t-surface-3);
+  color: var(--t-text);
+  border: 1px solid var(--t-border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  max-height: 20vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .status-action {

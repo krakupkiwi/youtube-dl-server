@@ -54,7 +54,7 @@ with open(_config_path, "w") as f:
 
 os.environ["YDL_CONFIG_PATH"] = _config_path
 
-from ydl_server.db import JobsDB  # noqa: E402 (must follow the env var being set above)
+from ydl_server.db import JobsDB
 
 JobsDB.init()
 

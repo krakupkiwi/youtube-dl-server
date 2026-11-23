@@ -219,6 +219,7 @@ def test_set_download_folders_mixed_entries_round_trip(isolated_config):
     # Re-reading the file the way load_config() would should normalize both
     # shapes identically to what we just wrote.
     import yaml
+
     from ydl_server.config import normalize_download_folders
 
     reloaded = yaml.safe_load(text)

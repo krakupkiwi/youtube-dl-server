@@ -1,4 +1,3 @@
-import os
 
 from ydl_server.ydlhandler import cleanup_partial_downloads
 

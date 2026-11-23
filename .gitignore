@@ -4,3 +4,4 @@ node_modules
 config.dev.yml
 dev-downloads/
 ydl_server/static/
+front/dist

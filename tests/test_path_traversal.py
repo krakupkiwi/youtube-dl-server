@@ -14,7 +14,6 @@ from ydl_server.config import (
 )
 from ydl_server.routes import routes
 
-
 # --- get_static_prefix ---------------------------------------------------
 
 def test_get_static_prefix_stops_at_template_variable():

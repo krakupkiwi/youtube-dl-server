@@ -1,6 +1,7 @@
 ydl_server:   # youtube-dl-server specific settings
   port: 8080      # Port youtube-dl-server should listen on
   host: 0.0.0.0   # IP youtube-dl-server should bind to
+  site_title: null
   debug: False    # Enable/Disable debug mode
   metadata_db_path: '/youtube-dl/.ydl-metadata.db' # Path to metadata DB
   output_playlist: '/youtube-dl/%(playlist_title)s [%(playlist_id)s]/%(title)s.%(ext)s' # Playlist output directory template
@@ -9,6 +10,13 @@ ydl_server:   # youtube-dl-server specific settings
   proxy_headers: True # uvicorn flag Enable/Disable X-Forwarded-Proto, X-Forwarded-For, X-Forwarded-Port to populate remote address info.
   default_format: video/best # Default format selection
   download_workers_count: 2 # Number of download worker threads
+  metadata_workers_count: 2
+  metadata_timeout: 60
+  process_stop_timeout: 2
+  shutdown_timeout: 5
+  schedule_upcoming: True # Park upcoming live events / premieres until their start time instead of failing them
+  schedule_check_interval: 60 # Seconds between checks for scheduled jobs that are due
+  schedule_max_attempts: 24 # Maximum number of times a job may be rescheduled before failing
 
 ydl_options:  # youtube-dl options
   output: '/youtube-dl/%(title)s [%(id)s].%(ext)s' # output directory template

@@ -1,11 +1,17 @@
 import logging
 import os
 import re
-import yaml
 import shutil
 from functools import cache
 
+import yaml
+
 logger = logging.getLogger(__name__)
+
+
+class ConfigError(Exception):
+    pass
+
 
 YDL_PATH_TYPES = (
     "home",
@@ -72,11 +78,9 @@ def normalize_use(use):
 
 def expand_alias(name, aliases, stack):
     if name in stack:
-        raise Exception(
-            "Recursive alias definition: {}".format(" -> ".join(stack + [name]))
-        )
+        raise ConfigError(f"Recursive alias definition: {' -> '.join(stack + [name])}")
     if name not in aliases:
-        raise Exception("Unknown alias '{}'".format(name))
+        raise ConfigError(f"Unknown alias '{name}'")
     alias = aliases[name]
     options = expand_uses(alias.get("use"), aliases, stack + [name])
     options.update(alias.get("ydl_options", {}))
@@ -124,12 +128,10 @@ def normalize_download_folders(config):
 def copy_default_config(config_file_path):
     try:
         shutil.copy("./default_config.yml", config_file_path)
-    except Exception as e:
-        raise Exception(
-            "Error copying default config file to {}:\n{}".format(
-                config_file_path, str(e)
-            )
-        )
+    except OSError as e:
+        raise ConfigError(
+            f"Error copying default config file to {config_file_path}:\n{e!s}"
+        ) from e
 
 
 def get_config_file_path():
@@ -150,7 +152,7 @@ def load_config():
         )
         try:
             copy_default_config(config_file_path)
-        except Exception:
+        except ConfigError:
             logger.warning("Error copying default config file, loading it directly")
             config_file_path = "./default_config.yml"
     with open(config_file_path) as configfile:
@@ -188,7 +190,7 @@ def set_age_limit(age_limit):
                 r"^ydl_options[ \t]*:.*\n([ \t]+)\S", text, re.MULTILINE
             )
             indent = indent_match.group(1) if indent_match else "  "
-        new_line = "{}age-limit: {}\n".format(indent, age_limit)
+        new_line = f"{indent}age-limit: {age_limit}\n"
         if existing:
             text = AGE_LIMIT_LINE_RE.sub(lambda m: new_line, text, count=1)
         else:
@@ -247,10 +249,8 @@ def _yaml_single_quote(value):
 def _download_folder_yaml_lines(folder):
     name, path = folder["name"], folder.get("path")
     if path:
-        return "  - name: {}\n    path: {}\n".format(
-            _yaml_single_quote(name), _yaml_single_quote(path)
-        )
-    return "  - {}\n".format(_yaml_single_quote(name))
+        return f"  - name: {_yaml_single_quote(name)}\n    path: {_yaml_single_quote(path)}\n"
+    return f"  - {_yaml_single_quote(name)}\n"
 
 
 def set_download_folders(folders):
@@ -271,7 +271,7 @@ def set_download_folders(folders):
 
     if folders:
         lines = "".join(_download_folder_yaml_lines(f) for f in folders)
-        block = "download_folders:  # subfolders selectable as a download destination\n{}".format(lines)
+        block = f"download_folders:  # subfolders selectable as a download destination\n{lines}"
     else:
         block = ""
 
@@ -367,15 +367,23 @@ def get_finished_path():
         prefix = os.path.join(get_paths_home() or os.getcwd(), prefix)
     finished_path = os.path.normpath(prefix)
     if finished_path == os.path.sep:
-        raise Exception(
-            "Could not determine the download directory from ydl_options.output "
-            "('{}'): it resolves to the filesystem root. Set ydl_options.paths, or "
-            "give ydl_options.output a static directory prefix.".format(
-                app_config["ydl_options"].get("output")
-            )
+        output = app_config["ydl_options"].get("output")
+        raise ConfigError(
+            f"Could not determine the download directory from ydl_options.output "
+            f"('{output}'): it resolves to the filesystem root. Set ydl_options.paths, or "
+            f"give ydl_options.output a static directory prefix."
         )
     os.makedirs(finished_path, mode=0o755, exist_ok=True)
     return finished_path + "/"
+
+
+def is_valid_download_title(title):
+    return (
+        isinstance(title, str)
+        and bool(title.strip())
+        and not title.startswith(".")
+        and not any(c in "/\\" or ord(c) < 32 or ord(c) == 127 for c in title)
+    )
 
 
 def resolve_finished_file(fname):
@@ -401,6 +409,6 @@ if (
     or app_config.get("ydl_options") is None
     or app_config["ydl_options"].get("output") is None
 ):
-    raise Exception("Invalid configuration file")
+    raise ConfigError("Invalid configuration file")
 
 get_finished_path()
